@@ -178,7 +178,7 @@ void renderToImage(
       if(h>1.0f)
         h = h-1.0f;
       float s = __saturatef(powf(data.buffer[j+params.n], 0.8f));
-      float l = __saturatef(powf(data.buffer[j+2*params.n], 0.8f));
+      float l = 1.0f-__saturatef(powf(data.buffer[j+2*params.n], 0.8f));
       hsl2rgb(h, s, l, ptr[j]);
     }else{
       T density = sqrt(data.buffer[j]);//exp(-data.buffer[j])

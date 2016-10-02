@@ -12,7 +12,7 @@
 #include <string>
 
 //Manages vertex and pixel shaders
-class ShaderManager
+class ShaderManager final
 {
 public:
   ShaderManager();
@@ -38,18 +38,19 @@ public:
 
   GLuint programID() const
   {
-    return _programID;
+    return programID_;
   }
 
 private:
   GLuint loadShader(const char * filename, int type);
   void readEntireFile(std::string* content, const char * filename);
+
 private:
-  GLuint _programID;
-  GLuint _vertexShaderID;
-  GLuint _pixelShaderID;
-  GLuint _geoShaderID;
-  bool _isLoaded;
+  GLuint programID_;
+  GLuint vertexShaderID_;
+  GLuint pixelShaderID_;
+  GLuint geoShaderID_;
+  bool isLoaded_;
 
 };
 

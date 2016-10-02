@@ -15,7 +15,7 @@ static int len = 0;
 //
 //-----------------------------------------------------------------------------
 ShaderManager::ShaderManager()
-    : _programID(0), _vertexShaderID(0), _pixelShaderID(0), _geoShaderID(0), _isLoaded(
+    : programID_(0), vertexShaderID_(0), pixelShaderID_(0), geoShaderID_(0), isLoaded_(
         false)
 {
 
@@ -25,8 +25,8 @@ ShaderManager::ShaderManager()
 //-----------------------------------------------------------------------------
 ShaderManager::~ShaderManager()
 {
-  if (_programID)
-    glDeleteProgram(_programID);
+  if (programID_)
+    glDeleteProgram(programID_);
 }
 //-----------------------------------------------------------------------------
 //bundles a VS and a PS into a program
@@ -35,47 +35,47 @@ void ShaderManager::load(const char * vertexshader,
                          const char * pixelshader,
                          const char * geoshader)
 {
-  if (_isLoaded)
+  if (isLoaded_)
   {
     printf("Shader already loaded to application.\n");
     exit(1);
   }
-  if (_programID == 0)
-    _programID = glCreateProgram();
+  if (programID_ == 0)
+    programID_ = glCreateProgram();
   if (vertexshader != NULL)
   {
-    _vertexShaderID = loadShader(vertexshader, GL_VERTEX_SHADER);
-    glAttachShader(_programID, _vertexShaderID);
+    vertexShaderID_ = loadShader(vertexshader, GL_VERTEX_SHADER);
+    glAttachShader(programID_, vertexShaderID_);
   }
   if (pixelshader != NULL)
   {
-    _pixelShaderID = loadShader(pixelshader, GL_FRAGMENT_SHADER);
-    glAttachShader(_programID, _pixelShaderID);
+    pixelShaderID_ = loadShader(pixelshader, GL_FRAGMENT_SHADER);
+    glAttachShader(programID_, pixelShaderID_);
   }
   if (geoshader != NULL)
   {
-    _geoShaderID = loadShader(geoshader, GL_GEOMETRY_SHADER);
-    glAttachShader(_programID, _geoShaderID);
+    geoShaderID_ = loadShader(geoshader, GL_GEOMETRY_SHADER);
+    glAttachShader(programID_, geoShaderID_);
 
-    glProgramParameteriEXT(_programID, GL_GEOMETRY_INPUT_TYPE_EXT, GL_POINTS);
-    glProgramParameteriEXT(_programID, GL_GEOMETRY_OUTPUT_TYPE_EXT,
+    glProgramParameteriEXT(programID_, GL_GEOMETRY_INPUT_TYPE_EXT, GL_POINTS);
+    glProgramParameteriEXT(programID_, GL_GEOMETRY_OUTPUT_TYPE_EXT,
                            GL_TRIANGLE_STRIP);
-    glProgramParameteriEXT(_programID, GL_GEOMETRY_VERTICES_OUT_EXT, 4);
+    glProgramParameteriEXT(programID_, GL_GEOMETRY_VERTICES_OUT_EXT, 4);
   }
-  _isLoaded = true;
+  isLoaded_ = true;
 }
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
 void ShaderManager::link()
 {
-  glLinkProgram(_programID);
+  glLinkProgram(programID_);
   if(CHECK_GLERROR() != GL_NO_ERROR)
     throw std::runtime_error("Could not link program.");
-  glGetProgramInfoLog(_programID, 1000, &len, buffer);
+  glGetProgramInfoLog(programID_, 1000, &len, buffer);
   if (len)
   {
-    std::cerr << "Link error, program "<<_programID<<": "<< buffer << std::endl;
+    std::cerr << "Link error, program "<<programID_<<": "<< buffer << std::endl;
     throw std::runtime_error("Linking program failed.");
   }
 }
@@ -148,13 +148,13 @@ GLuint ShaderManager::loadShader(const char *filename, int type)
 //-----------------------------------------------------------------------------
 int ShaderManager::getUniformVarID(const char *name)
 {
-  glGetUniformLocation(_programID, name);
+  glGetUniformLocation(programID_, name);
   if (CHECK_GLERROR() != GL_NO_ERROR)
   {
     fprintf(stderr, "Could not get uniform location '%s'.\n", name);
     return -1;
   }
-  return glGetUniformLocation(_programID, name);
+  return glGetUniformLocation(programID_, name);
 }
 //-----------------------------------------------------------------------------
 //
@@ -196,7 +196,7 @@ void ShaderManager::setUniformMat4(const char* name, float* array)
 //-----------------------------------------------------------------------------
 void ShaderManager::bind()
 {
-  glUseProgram(_programID);
+  glUseProgram(programID_);
   glEnable(GL_VERTEX_PROGRAM_ARB);
   glEnable(GL_FRAGMENT_PROGRAM_ARB);
 }
@@ -214,7 +214,7 @@ void ShaderManager::unbind()
 //-----------------------------------------------------------------------------
 bool ShaderManager::isLoaded()
 {
-  return _isLoaded;
+  return isLoaded_;
 }
 //-----------------------------------------------------------------------------
 //
@@ -244,16 +244,16 @@ void ShaderManager::readEntireFile(std::string* content, const char * filename)
 //-----------------------------------------------------------------------------
 void ShaderManager::unload()
 {
-  if (_programID == 0)
+  if (programID_ == 0)
   {
     printf("Error occurred on unloading Shader.\n");
     exit(1);
   }
-  if (_vertexShaderID)
-    glDetachShader(_programID, _vertexShaderID);
-  if (_pixelShaderID)
-    glDetachShader(_programID, _pixelShaderID);
-  if (_geoShaderID)
-    glDetachShader(_programID, _geoShaderID);
-  _isLoaded = false;
+  if (vertexShaderID_)
+    glDetachShader(programID_, vertexShaderID_);
+  if (pixelShaderID_)
+    glDetachShader(programID_, pixelShaderID_);
+  if (geoShaderID_)
+    glDetachShader(programID_, geoShaderID_);
+  isLoaded_ = false;
 }

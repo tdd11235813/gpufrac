@@ -40,9 +40,9 @@ class Application : public nanogui::Screen
     virtual
     ~Application();
 
-    virtual void draw(NVGcontext *ctx);
-    virtual bool keyboardEvent(int key, int scancode, int action, int modifiers);
-    virtual void drawContents();
+    virtual void draw(NVGcontext *ctx) override;
+    virtual bool keyboardEvent(int key, int scancode, int action, int modifiers) override;
+    virtual void drawContents() override;
 
   private:
     void create_quad();

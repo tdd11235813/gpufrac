@@ -1,4 +1,3 @@
-
 #include "application.h"
 #include <nanogui/nanogui.h>
 
@@ -9,7 +8,7 @@ int main(int argc, char** argv)
 {
   try
   {
-    cout << listCudaDevices().str();
+    std::cout << listCudaDevices().str();
     CHECK_CUDA( cudaSetDevice(0) );
 
     nanogui::init();
@@ -33,7 +32,6 @@ int main(int argc, char** argv)
 #endif
     throw e;
   }
-
   CHECK_CUDA(cudaDeviceReset());
   return EXIT_SUCCESS;
 }

@@ -239,6 +239,9 @@ void Application<T>::runCuda()
       else
         ms_kernel_ = launch_kernel<3,false>(resource_, ddata_, parameters_);
       break;
+    case Fractal::_COUNT:
+    default:
+      return;
   }
 }
 
@@ -269,7 +272,7 @@ void Application<T>::draw(NVGcontext* ctx)
       labelStatus_->setCaption(std::string("Saved to: ") + s);
     }catch(const std::runtime_error& e){
       using namespace nanogui;
-      auto dlg = new MessageDialog(
+      new MessageDialog(
           this,
           MessageDialog::Type::Warning,
           "Could not save image!",
@@ -318,7 +321,6 @@ void Application<T>::drawContents()
       GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
   shader_.bind();
-  shader_.setUniformVar("image",0);
   glBindVertexArray(vertexArrayQuad_);
   glDrawElements(GL_TRIANGLE_STRIP, 4, GL_UNSIGNED_SHORT, 0);
   glBindVertexArray(0);
@@ -346,6 +348,10 @@ void Application<T>::create_shader()
     shader_.unload();
   shader_.load("shaders/quad.vert", "shaders/quad.frag");
   shader_.link();
+
+  shader_.bind();
+  shader_.setUniformVar("image",0);
+  shader_.unbind();
 }
 
 template<typename T>
@@ -369,6 +375,11 @@ bool Application<T>::keyboardEvent(int key, int scancode, int action, int modifi
   {
     window_->setVisible(!window_->visible());
     window_status_->setVisible(!window_status_->visible());
+    return true;
+  }
+  if (key == GLFW_KEY_S && action == GLFW_PRESS)
+  {
+    screenshot_=true;
     return true;
   }
   return false;
@@ -524,15 +535,16 @@ bool Application<T>::mouseButtonEvent(const Eigen::Vector2i& p, int button, bool
 }
 
 template<typename T>
-bool Application<T>::scrollEvent(const Eigen::Vector2i& p, const Eigen::Vector2f& rel)
+bool Application<T>::scrollEvent(const Eigen::Vector2i& p,
+				 const Eigen::Vector2f& rel)
 {
   Screen::scrollEvent(p, rel);
   if(window_->contains(p)==false && window_status_->contains(p)==false) {
     double vx = 1.0*p.x()/width();
     double vy = 1.0-1.0*p.y()/height();
 
-    double zfactor_x = 0.1*rel.y()*(parameters_.x1-parameters_.x0);
-    double zfactor_y = 0.1*rel.y()*(parameters_.y1-parameters_.y0);
+    double zfactor_x = 0.1*rel.y()*(parameters_.x0-parameters_.x1);
+    double zfactor_y = 0.1*rel.y()*(parameters_.y0-parameters_.y1);
     parameters_.x0 -= vx*zfactor_x;
     parameters_.x1 += (1.0-vx)*zfactor_x;
     parameters_.y0 -= vy*zfactor_y;
