@@ -37,54 +37,63 @@ Application<T>::Application()
 
   gui->addGroup("Parameters");
   IntBox<unsigned>* box = gui->addVariable("Iterations", parameters_.max_iterations);
-  box->setCallback([&](auto v){
-    mutex_max_iterations_.lock();
-    parameters_.max_iterations = v;
-    tmp_max_iterations_ = v;
-    mutex_max_iterations_.unlock();
-    redraw_ = true;
-  } );
+  box->setCallback([&](auto v){this->update_value(parameters_.max_iterations, v); } );
   box->setValueIncrement(16);
   box->setSpinnable(true);
   box->setMinMaxValues(1, 1024);
-  tmp_max_iterations_ = parameters_.max_iterations;
+
+  box = gui->addVariable("IterationsPerRun", parameters_.iterations_per_run);
+  box->setCallback([&](auto v){this->update_value(parameters_.iterations_per_run, v); } );
+  box->setValueIncrement(16);
+  box->setSpinnable(true);
+  box->setMinMaxValues(1, 128);
 
   std::array<std::string, 4> cflabels = {{"c0", "c1", "c2", "c3"}};
   auto* coeffbox = gui->addVariable(cflabels[0], parameters_.t0);
   coeffbox->setValueIncrement(0.05);
   coeffbox->setSpinnable(true);
-  coeffbox->setCallback([&](auto v){parameters_.t0 = v; redraw_=true;});
+  coeffbox->setCallback([&](auto v){ this->update_value(parameters_.t0, v); });
   coeffbox = gui->addVariable(cflabels[1], parameters_.t1);
   coeffbox->setValueIncrement(0.05);
   coeffbox->setSpinnable(true);
-  coeffbox->setCallback([&](auto v){parameters_.t1 = v; redraw_=true;});
+  coeffbox->setCallback([&](auto v){ this->update_value(parameters_.t1, v); });
   coeffbox = gui->addVariable(cflabels[2], parameters_.t2);
   coeffbox->setValueIncrement(0.05);
   coeffbox->setSpinnable(true);
-  coeffbox->setCallback([&](auto v){parameters_.t2 = v; redraw_=true;});
+  coeffbox->setCallback([&](auto v){ this->update_value(parameters_.t2, v); });
   coeffbox = gui->addVariable(cflabels[3], parameters_.t3);
   coeffbox->setValueIncrement(0.05);
   coeffbox->setSpinnable(true);
-  coeffbox->setCallback([&](auto v){parameters_.t3 = v; redraw_=true;});
+  coeffbox->setCallback([&](auto v){this->update_value(parameters_.t3, v);});
 
   coeffbox = gui->addVariable("Lambda", parameters_.talpha);
   coeffbox->setValueIncrement(0.005);
   coeffbox->setSpinnable(true);
-  coeffbox->setCallback([&](auto v){parameters_.talpha = v; redraw_=true;});
+  coeffbox->setCallback([&](auto v){this->update_value(parameters_.talpha, v);});
 
   coeffbox = gui->addVariable("Hit value", parameters_.addValue);
   coeffbox->setValueIncrement(0.001);
   coeffbox->setMinValue(0.001);
   coeffbox->setSpinnable(true);
-  coeffbox->setCallback([&](auto v){parameters_.addValue = v; redraw_=true;});
+  coeffbox->setCallback([&](auto v){this->update_value(parameters_.addValue, v);});
 
 
   gui->addGroup("Image");
   gui_texWidth_ = gui->addVariable("texWidth", parameters_.width);
-  gui_texWidth_->setCallback([&](auto v){tmp_texWidth_ = v; rescale_ = true;} );
+  gui_texWidth_->setCallback([&](auto v){
+      if(tmp_texWidth_!=v) {
+	tmp_texWidth_ = v;
+	rescale_ = true;
+      }
+    } );
   gui_texWidth_->setMinMaxValues(32, 2048);
   gui_texHeight_ = gui->addVariable("texHeight", parameters_.height);
-  gui_texHeight_->setCallback([&](auto v){tmp_texHeight_ = v; rescale_ = true;} );
+  gui_texHeight_->setCallback([&](auto v){
+      if(tmp_texHeight_!=v) {
+	tmp_texHeight_ = v;
+	rescale_ = true;
+      }
+    } );
   gui_texHeight_->setMinMaxValues(32, 2048);
   tmp_texWidth_ = parameters_.width;
   tmp_texHeight_ = parameters_.height;
@@ -113,16 +122,12 @@ Application<T>::Application()
 
   gui->addGroup("Coloring");
   auto* hsbbox = gui->addVariable("HSL Mode", settings_.hslMode);
-  hsbbox->setCallback([&](auto v){settings_.hslMode = v; redraw_ = true;} );
+  hsbbox->setCallback([&](auto v){this->update_value(settings_.hslMode, v);} );
 
   Slider *slider = new Slider(gui->window());
   slider->setValue(0.0f);
   slider->setFixedWidth(80);
-  slider->setFinalCallback([&](float value)
-  {
-    parameters_.hueOffset = value;
-    redraw_ = true;
-  });
+  slider->setFinalCallback([&](float v){this->update_value(parameters_.hueOffset, v); });
   gui->addWidget("Hue", slider);
 
 
@@ -133,12 +138,17 @@ Application<T>::Application()
 
   auto* cobo = gui->addVariable("Fractal", settings_.fractal);
   cobo->setItems({"Popcorn 1", "Popcorn 2", "Popcorn 3", "Popcorn 4"});
-  cobo->setCallback([&](auto state) { settings_.fractal = state; redraw_=true; });
+  cobo->setCallback([&](auto state) { this->update_value(settings_.fractal, state); });
 
   gui->addButton("Screenshot", [&](){screenshot_=true;});
   Button* button = btnAnimate_ = gui->addButton("Animate", nullptr);
   button->setFlags(Button::ToggleButton);
-  button->setChangeCallback([&](bool state){settings_.animation=state;labelStatus_->setCaption("");});
+  button->setChangeCallback([&](bool state){
+      settings_.animation=state;
+      if(state==false)
+	recompute();
+      labelStatus_->setCaption("");
+    });
 
   // status window
   window_status_ = new Window(this, "Status");
@@ -178,11 +188,11 @@ Application<T>::Application()
         ss << "Kernel: " << std::fixed << std::setprecision(1) << ms_kernel_ <<" ms";
         labelStatus_->setCaption(ss.str());
       }
-      mutex_max_iterations_.lock();
-      parameters_.max_iterations = tmp_max_iterations_;
-      mutex_max_iterations_.unlock();
-      redraw_ = true;
       std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+      if(app_started_==false) {
+	recompute();
+	app_started_ = true;
+      }
     }
   }).detach();
 
@@ -211,33 +221,41 @@ void Application<T>::cleanup()
 }
 
 template<typename T>
+void Application<T>::recompute() {
+  recompute_ = true;
+  iterations_offset_ = 0;
+}
+
+template<typename T>
 void Application<T>::runCuda()
 {
-  init_buffer(ddata_, parameters_);
+  if(iterations_offset_==0)
+    init_buffer(ddata_, parameters_);
+
   switch(settings_.fractal) {
     case Fractal::POPCORN0:
       if(settings_.hslMode)
-        ms_kernel_ = launch_kernel<0,true>(resource_, ddata_, parameters_);
+	ms_kernel_ = launch_kernel<0,true>(resource_, ddata_, parameters_, iterations_offset_);
       else
-        ms_kernel_ = launch_kernel<0,false>(resource_, ddata_, parameters_);
+	ms_kernel_ = launch_kernel<0,false>(resource_, ddata_, parameters_, iterations_offset_);
       break;
     case Fractal::POPCORN1:
       if(settings_.hslMode)
-        ms_kernel_ = launch_kernel<1,true>(resource_, ddata_, parameters_);
+	ms_kernel_ = launch_kernel<1,true>(resource_, ddata_, parameters_, iterations_offset_);
       else
-        ms_kernel_ = launch_kernel<1,false>(resource_, ddata_, parameters_);
+	ms_kernel_ = launch_kernel<1,false>(resource_, ddata_, parameters_, iterations_offset_);
       break;
     case Fractal::POPCORN2:
       if(settings_.hslMode)
-        ms_kernel_ = launch_kernel<2,true>(resource_, ddata_, parameters_);
+	ms_kernel_ = launch_kernel<2,true>(resource_, ddata_, parameters_, iterations_offset_);
       else
-        ms_kernel_ = launch_kernel<2,false>(resource_, ddata_, parameters_);
+	ms_kernel_ = launch_kernel<2,false>(resource_, ddata_, parameters_, iterations_offset_);
       break;
     case Fractal::POPCORN3:
       if(settings_.hslMode)
-        ms_kernel_ = launch_kernel<3,true>(resource_, ddata_, parameters_);
+	ms_kernel_ = launch_kernel<3,true>(resource_, ddata_, parameters_, iterations_offset_);
       else
-        ms_kernel_ = launch_kernel<3,false>(resource_, ddata_, parameters_);
+	ms_kernel_ = launch_kernel<3,false>(resource_, ddata_, parameters_, iterations_offset_);
       break;
     case Fractal::_COUNT:
     default:
@@ -257,7 +275,7 @@ void Application<T>::draw(NVGcontext* ctx)
     create_buffers();
     initCuda();
     rescale_ = false;
-    redraw_ = true;
+    recompute();
   }else if(reset_buffer_){
     init_buffer(ddata_, parameters_);
     reset_buffer_=false;
@@ -281,20 +299,25 @@ void Application<T>::draw(NVGcontext* ctx)
     screenshot_ = false;
   }
 
+  // compute part
+
   static double oldtime = glfwGetTime();
   double current_time = glfwGetTime();
-  if (settings_.animation == true || redraw_)
+  if (settings_.animation == true || recompute_)
   {
     double delta = settings_.timeScale * (current_time - oldtime);
     if(settings_.animation) {
-      unsigned tmpit = parameters_.max_iterations;
+      iterations_offset_ = 0;
       parameters_.time += delta;
-      parameters_.max_iterations = tmpit>128 ? 128 : tmpit;
       runCuda();
-      parameters_.max_iterations = tmpit;
-    }else
+    }else{ // animation is false, but recompute is true
       runCuda();
-    redraw_ = false;
+      iterations_offset_ += parameters_.iterations_per_run;
+      if( iterations_offset_ >= parameters_.max_iterations) {
+	iterations_offset_ = 0;
+	recompute_ = false;
+      }
+    }
   }
   oldtime = current_time;
 
@@ -369,6 +392,8 @@ bool Application<T>::keyboardEvent(int key, int scancode, int action, int modifi
     settings_.animation = !settings_.animation;
     btnAnimate_->setPushed(settings_.animation);
     labelStatus_->setCaption("");
+    if(settings_.animation==false)
+      recompute();
     return true;
   }
   if (key == GLFW_KEY_M && action == GLFW_PRESS)
@@ -508,10 +533,7 @@ bool Application<T>::mouseMotionEvent(const Eigen::Vector2i& p,
     parameters_.x1 -= dx;
     parameters_.y0 -= dy;
     parameters_.y1 -= dy;
-    mutex_max_iterations_.lock();
-    parameters_.max_iterations = parameters_.max_iterations<64?parameters_.max_iterations:64;
-    mutex_max_iterations_.unlock();
-    redraw_ = true;
+    recompute();
     return true;
   }
   return false;
@@ -549,10 +571,7 @@ bool Application<T>::scrollEvent(const Eigen::Vector2i& p,
     parameters_.x1 += (1.0-vx)*zfactor_x;
     parameters_.y0 -= vy*zfactor_y;
     parameters_.y1 += (1.0-vy)*zfactor_y;
-    mutex_max_iterations_.lock();
-    parameters_.max_iterations = parameters_.max_iterations<64?parameters_.max_iterations:64;
-    mutex_max_iterations_.unlock();
-    redraw_ = true;
+    recompute();
     return true;
   }
   return false;

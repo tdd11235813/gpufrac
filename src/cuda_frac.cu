@@ -34,9 +34,9 @@ void hsl2rgb( float hue, float sat, float lum, uchar4& color )
     const float rcpsixth = 6.0;
 
 
-    float xtr =    rcpsixth * (hue - twothird);
-    float xtg =   0.0;
-    float xtb =    rcpsixth * (1.0 - hue);
+    float xtr = rcpsixth * (hue - twothird);
+    float xtg = 0.0;
+    float xtb = rcpsixth * (1.0 - hue);
 
     if (hue < twothird) {
         xtr = 0.0;
@@ -73,6 +73,33 @@ void hsl2rgb( float hue, float sat, float lum, uchar4& color )
     }
 }
 
+
+template<typename T>
+__global__
+void d_init_buffer(
+      Data<T> _data,
+      const Parameters<T> _params)
+{
+  unsigned i,j,offset_ij;
+  T width = _params.width;
+  T height = _params.height;
+  for (i = blockIdx.y * blockDim.y + threadIdx.y;
+       i < _params.height;
+       i += blockDim.y * gridDim.y)
+  {
+    for (j = blockIdx.x * blockDim.x + threadIdx.x;
+	 j < _params.width;
+	 j += blockDim.x * gridDim.x)
+    {
+      offset_ij = j+i*_params.width;
+      _data.buffer[offset_ij]             = 0.0f;
+      _data.buffer[offset_ij+1*_params.n] = 0.0f;
+      _data.buffer[offset_ij+2*_params.n] = 0.0f;
+      _data.buffer[offset_ij+3*_params.n] = map(j, _params.x0, _params.x1, width);
+      _data.buffer[offset_ij+4*_params.n] = map(i, _params.y0, _params.y1, height);
+    }
+  }
+}
 /**
  *
  */
@@ -86,10 +113,10 @@ __global__ void d_clear_color(uchar4 *ptr, unsigned n)
   ptr[i].z = 0;
 }
 
-template<unsigned FuncId, typename T>
+template<unsigned TFuncId, typename T>
 inline __device__
 T funcX(T t, const T time, T xk, T yk, const Parameters<T>& params) {
-  switch(FuncId) {
+  switch(TFuncId) {
     case 0: return xk+params.talpha*cos( params.t0+time+yk+cos(params.t1+time+PI*xk));
     case 1: return t*yk+0.95f*xk-params.talpha*sin(0.7f*yk);//+sin(3.0f*0.7f*yk));
     // xk-hf(y+hf(x)), f(x)=sin(x+sin(3x))
@@ -99,10 +126,10 @@ T funcX(T t, const T time, T xk, T yk, const Parameters<T>& params) {
   return xk;
 }
 
-template<unsigned FuncId, typename T>
+template<unsigned TFuncId, typename T>
 inline __device__
-T funcY(T t, T time, T xk, T yk, const Parameters<T>& params) {
-  switch(FuncId) {
+T funcY(T t, const T time, T xk, T yk, const Parameters<T>& params) {
+  switch(TFuncId) {
     case 0: return yk+params.talpha*cos( params.t2+time+xk+cos(params.t3+time+PI*yk));
     case 1: return t*xk+0.95f*yk+params.talpha*sin(0.6f*xk);//+sin(3.0f*0.6f*xk));
     case 2: return yk+params.talpha*sin(params.t2+time+xk+sin(params.t3+time+3.0*xk));
@@ -111,56 +138,114 @@ T funcY(T t, T time, T xk, T yk, const Parameters<T>& params) {
   return yk;
 }
 
-template<unsigned FuncId, bool HSB, typename T>
+template<typename T>
+__device__ void d_draw_line(Data<T>& _data,
+		       const Parameters<T>& _params,
+		       unsigned x0, unsigned y0,
+		       unsigned x1, unsigned y1,
+		       T v)
+{
+  unsigned tmp;
+  if( x0 > x1 ) {
+    tmp = x0;
+    x0 = x1;
+    x1 = tmp;
+  }
+  if( y0 > y1 ) {
+    tmp = y0;
+    y0 = y1;
+    y1 = tmp;
+  }
+  unsigned dx = x1 - x0;
+  unsigned dy = y1 - y0;
+  int D = 2*dy - dx;
+  unsigned y = y0;
+  for(unsigned x=x0; x<x1; ++x) {
+    unsigned offset = x + y*_params.width;
+    atomicAdd(_data.buffer+offset, v); // hue
+    atomicAdd(_data.buffer+offset+_params.n, v); // saturation
+    atomicAdd(_data.buffer+offset+2*_params.n, v); // brightness
+    if(D >= 0) {
+      y = y + 1;
+      D = D - dx;
+    }
+    D = D + dy;
+  }
+}
+
+template<unsigned TFuncId,
+	   bool TColoring,
+	   typename T>
 __global__
-void generatePattern(
-      Data<T> data,
-      const Parameters<T> params
+void d_generate_pattern(
+      Data<T> _data,
+      const Parameters<T> _params,
+      const T _iteration_start,
+      const T _iteration_end,
+      const T _iteration_step_size
     )
 {
   unsigned i,j;
+  unsigned pxo=0xffff, pyo=0xffff;
   unsigned px, py;
+  unsigned offset_ij;
   T xk,yk;
-  T width = params.width;
-  T height = params.height;
-  T ts = 1.0f/(params.max_iterations-1);
+  T width = _params.width;
+  T height = _params.height;
   T t;
   for (i = blockIdx.y * blockDim.y + threadIdx.y;
-       i < params.height;
+       i < _params.height;
        i += blockDim.y * gridDim.y)
   {
     for (j = blockIdx.x * blockDim.x + threadIdx.x;
-         j < params.width;
+	 j < _params.width;
          j += blockDim.x * gridDim.x)
     {
-      xk = map(j, params.x0, params.x1, width);
-      yk = map(i, params.y0, params.y1, height);
+      offset_ij = j+i*_params.width;
+      xk = _data.buffer[offset_ij + 3*_params.n];
+      yk = _data.buffer[offset_ij + 4*_params.n];
+      pxo=0xffff;
+      pyo=0xffff;
+      for(t=_iteration_start; t<_iteration_end; t+=_iteration_step_size) {
+	xk = funcX<TFuncId>(t, _params.time, xk, yk, _params);
+	yk = funcY<TFuncId>(t, _params.time, xk, yk, _params);
+	px = unmap(xk, _params.x0, _params.x1, width);
+	py = unmap(yk, _params.y0, _params.y1, height);
+	if (px<_params.width && py<_params.height) {
+	  unsigned offset = px+py*_params.width;
+	  if(TColoring) {
+	    T v = _params.addValue*t;
+	    if(pxo!=0xffff && pyo!=0xffff && (pxo!=px || pyo!=py) ){
+	      if( (px<pxo ? (pxo-px)>2 && (pxo-px)<50 : (px-pxo)>2 && (px-pxo)<50 ) ||
+		  (py<pyo ? (pyo-py)>2 && (pyo-py)<50 : (py-pyo)>2 && (py-pyo)<50 )
+		  ) {
+	      // draw line to previous pixel
+		d_draw_line(_data, _params,
+			    px,py, pxo,pyo,
+			    v*rsqrtf( (px-pxo)*(px-pxo) + (py-pyo)*(py-pyo) ) );
+	      }
+	    }
 
-      for(t=0.0f; t<1.0f; t+=ts) {
-        xk = funcX<FuncId>(t, params.time, xk, yk, params);
-        yk = funcY<FuncId>(t, params.time, xk, yk, params);
-        px = unmap(xk, params.x0, params.x1, width);
-        py = unmap(yk, params.y0, params.y1, height);
-        if (px<params.width && py<params.height) {
-          unsigned offset = px+py*params.width;
-          if(HSB) {
-            T v = params.addValue*t;
+	    atomicAdd(_data.buffer+offset, v); // hue
+	    atomicAdd(_data.buffer+offset+_params.n, v); // saturation
+	    atomicAdd(_data.buffer+offset+2*_params.n, v); // brightness
+	    pxo = px;
+	    pyo = py;
 
-            atomicAdd(data.buffer+offset, v); // hue
-            atomicAdd(data.buffer+offset+params.n, v); // saturation
-            atomicAdd(data.buffer+offset+2*params.n, v); // brightness
-          }else{
-            atomicAdd(data.buffer+offset, params.addValue);
-          }
-        }
+	  }else{
+	    atomicAdd(_data.buffer+offset, _params.addValue);
+	  }
+	}
       }
+      _data.buffer[offset_ij + 3*_params.n] = xk;
+      _data.buffer[offset_ij + 4*_params.n] = yk;
     }
   }
 }
 
-template<bool HSB, typename T>
+template<bool TColoring, typename T>
 __global__
-void renderToImage(
+void d_render_to_image(
       uchar4 *ptr,
       Data<T> data,
       const Parameters<T> params
@@ -171,14 +256,14 @@ void renderToImage(
        j < params.n;
        j += blockDim.x * gridDim.x)
   {
-    if(HSB)
+    if(TColoring)
     {
       T v = data.buffer[j];
       float h = 0.5f-powf(0.3f*__saturatef(v), 0.2f)+params.hueOffset;
       if(h>1.0f)
         h = h-1.0f;
       float s = __saturatef(powf(data.buffer[j+params.n], 0.8f));
-      float l = 1.0f-__saturatef(powf(data.buffer[j+2*params.n], 0.8f));
+      float l = /*1.0f-*/__saturatef(powf(data.buffer[j+2*params.n], 0.8f));
       hsl2rgb(h, s, l, ptr[j]);
     }else{
       T density = sqrt(data.buffer[j]);//exp(-data.buffer[j])
@@ -195,11 +280,12 @@ void renderToImage(
 /**
  *
  */
-template<unsigned FuncId, bool HSB, typename T>
+template<unsigned TFuncId, bool TColoring, typename T>
 float launch_kernel(
-    cudaGraphicsResource* dst,
-    Data<T>& ddata,
-    const Parameters<T>& params)
+    cudaGraphicsResource* _dst,
+    Data<T>& _ddata,
+    const Parameters<T>& _params,
+    unsigned _iteration_offset)
 {
   int numSMs;
   int devId = 0;
@@ -208,27 +294,38 @@ float launch_kernel(
   dim3 threads( 16, 16 );
   dim3 threads1d( 128 );
   dim3 blocks( 32*numSMs );
-  uchar4* pos;
   size_t num_bytes;
   cudaError_t err;
   float ms = 0.0f;
 
-  err=cudaGraphicsMapResources(1, &dst, 0);
+  err=cudaGraphicsMapResources(1, &_dst, 0);
   if (err == cudaSuccess)
   {
+    uchar4* pos;
+    const T it_start = _iteration_offset/T(_params.max_iterations);
+    const T it_end = it_start + _params.iterations_per_run/T(_params.max_iterations);
+    const T it_step_size = 1.0/T(_params.max_iterations);
+
     CHECK_CUDA(cudaGraphicsResourceGetMappedPointer(
-        (void**)&pos, &num_bytes, dst));
+	(void**)&pos, &num_bytes, _dst));
 
     CHECK_CUDA(cudaEventRecord(custart));
-    generatePattern<FuncId, HSB><<<blocks, threads>>>(ddata, params);
+    if(_iteration_offset==0) {
+      d_generate_pattern<TFuncId, TColoring>
+	<<<blocks, threads>>>(_ddata, _params, it_start, it_end, it_step_size);
+    }else{
+       d_generate_pattern<TFuncId, TColoring>
+	<<<blocks, threads>>>(_ddata, _params, it_start, it_end, it_step_size);
+    }
+
     CHECK_CUDA(cudaEventRecord(cuend));
 
-    renderToImage<HSB><<<blocks, threads1d>>>(pos, ddata, params);
+    d_render_to_image<TColoring><<<blocks, threads1d>>>(pos, _ddata, _params);
 
     CHECK_CUDA( cudaEventSynchronize(cuend) );
     CHECK_CUDA( cudaEventElapsedTime(&ms, custart, cuend) );
   }
-  CHECK_CUDA( cudaGraphicsUnmapResources(1, &dst, 0));
+  CHECK_CUDA( cudaGraphicsUnmapResources(1, &_dst, 0));
   return ms;
 }
 
@@ -246,11 +343,12 @@ void alloc_buffer(
     CHECK_CUDA( cudaEventDestroy(custart) );
     CHECK_CUDA( cudaEventDestroy(cuend) );
   }
-  unsigned n = 4 * params.n;
+  unsigned n = 5 * params.n;
   CHECK_CUDA( cudaMalloc(&ddata.buffer, n*sizeof(T)) );
   CHECK_CUDA( cudaEventCreate(&custart) );
   CHECK_CUDA( cudaEventCreate(&cuend) );
 }
+
 /**
  *
  */
@@ -259,10 +357,18 @@ void init_buffer(
     Data<T>& ddata,
     const Parameters<T>& params)
 {
-  unsigned n = 4 * params.n;
-  CHECK_CUDA( cudaMemset(ddata.buffer, 0.0, n*sizeof(T)));
+  //unsigned n = 5 * params.n;
+  //  CHECK_CUDA( cudaMemset(ddata.buffer, 0.0, n*sizeof(T)));
+  int numSMs;
+  int devId = 0;
+  cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, devId);
+
+  dim3 threads( 16, 16 );
+  dim3 blocks( 32*numSMs );
+  d_init_buffer<<<blocks, threads>>>(ddata, params);
   CHECK_CUDA( cudaDeviceSetCacheConfig(cudaFuncCachePreferL1) );
 }
+
 /**
  *
  */
@@ -281,14 +387,14 @@ template
 void alloc_buffer<float>(Data<float>&, const Parameters<float>&);
 template
 void init_buffer<float>(Data<float>&, const Parameters<float>&);
-template float launch_kernel<0, false, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&);
-template float launch_kernel<1, false, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&);
-template float launch_kernel<2, false, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&);
-template float launch_kernel<3, false, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&);
-template float launch_kernel<0, true, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&);
-template float launch_kernel<1, true, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&);
-template float launch_kernel<2, true, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&);
-template float launch_kernel<3, true, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&);
+template float launch_kernel<0, false, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&, unsigned);
+template float launch_kernel<1, false, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&, unsigned);
+template float launch_kernel<2, false, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&, unsigned);
+template float launch_kernel<3, false, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&, unsigned);
+template float launch_kernel<0, true, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&, unsigned);
+template float launch_kernel<1, true, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&, unsigned);
+template float launch_kernel<2, true, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&, unsigned);
+template float launch_kernel<3, true, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&, unsigned);
 template
 void cleanup_cuda<float>(Data<float>&);
 

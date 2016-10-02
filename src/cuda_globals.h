@@ -36,8 +36,9 @@ struct Parameters
   T time = 0.0;
   unsigned width=800;
   unsigned height=800;
-  unsigned n=0;
   unsigned max_iterations=64;
+  unsigned iterations_per_run=32;
+  unsigned n=0;
   T hueOffset=0.0;
 };
 /// User Setting
@@ -48,6 +49,7 @@ struct UserSetting
   bool animation=false;
   bool vsync = false;
   double timeScale = 0.15;
+
   std::string outputDir="output";
   std::string prefix="img_";
 };
@@ -56,7 +58,8 @@ template<unsigned FuncId, bool HSB, typename T>
 float launch_kernel(
     cudaGraphicsResource* dst,
     Data<T>& ddata,
-    const Parameters<T>& params);
+    const Parameters<T>& params,
+    unsigned);
 
 template<typename T>
 void alloc_buffer(

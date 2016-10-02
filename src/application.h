@@ -52,6 +52,16 @@ class Application : public nanogui::Screen
     void create_buffers();
     void runCuda();
     void computeFPS();
+    void recompute();
+
+    template<typename U, typename V>
+    void update_value(U& target, V source) {
+      if(target != source) {
+	target = static_cast<U>(source);
+	recompute();
+      }
+    }
+
     virtual bool mouseMotionEvent(const Eigen::Vector2i &p,
                                 const Eigen::Vector2i &rel,
                                 int button, int modifiers) override;
@@ -67,15 +77,15 @@ class Application : public nanogui::Screen
     cudaGraphicsResource_t resource_ = 0;
     ShaderManager shader_;
 
+    bool app_started_ = false;
     bool rescale_ = false;
     bool reset_buffer_ = false;
     bool screenshot_ = false;
-    bool redraw_ = true;
+    bool recompute_ = false;
     bool mousePressed_ = false;
     unsigned tmp_texWidth_;
     unsigned tmp_texHeight_;
-    unsigned tmp_max_iterations_;
-    std::mutex mutex_max_iterations_;
+    //    std::mutex mutex_max_iterations_;
 
     Parameters<T> parameters_;
     Data<T> ddata_;
@@ -83,6 +93,7 @@ class Application : public nanogui::Screen
     double fps_ = 0.0;
     float ms_kernel_ = 0.0f;
     Resolution resolution_;
+    unsigned iterations_offset_;
 
     nanogui::ref<nanogui::Window> window_;
     nanogui::ref<nanogui::Window> window_status_;
