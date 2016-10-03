@@ -97,6 +97,7 @@ class Application : public nanogui::Screen
 
     nanogui::ref<nanogui::Window> window_;
     nanogui::ref<nanogui::Window> window_status_;
+    nanogui::ref<nanogui::Window> window_shading_;
     nanogui::Button* btnAnimate_ = nullptr;
     nanogui::Label* labelStatus_ = nullptr;
     nanogui::Label* labelPosition_ = nullptr;

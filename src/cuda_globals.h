@@ -39,7 +39,15 @@ struct Parameters
   unsigned max_iterations=64;
   unsigned iterations_per_run=32;
   unsigned n=0;
-  T hueOffset=0.0;
+  bool use_atomics = true;
+  bool invert = false;
+  T hue_start = 0.0;
+  T hue_end   = 0.3;
+  T hue_slope = 1.45;
+  T density_slope = 1.0;
+  T brightness_slope = 1.0;
+  T saturation_slope = 1.0;
+
 };
 /// User Setting
 struct UserSetting

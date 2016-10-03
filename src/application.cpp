@@ -13,12 +13,12 @@
 
 template<typename T>
 Application<T>::Application()
-: nanogui::Screen(Eigen::Vector2i(1024, 768),
-                  "Fractal Dynamic Systems",
-                  /*resizable*/true, /*fullscreen*/true, /*colorBits*/8,
-                  /*alphaBits*/8, /*depthBits*/24, /*stencilBits*/8,
-                  /*nSamples*/0, /*glMajor*/4, /*glMinor*/1
-  )
+  : nanogui::Screen(Eigen::Vector2i(1024, 768),
+                    "Fractal Dynamic Systems",
+                    /*resizable*/true, /*fullscreen*/true, /*colorBits*/8,
+                    /*alphaBits*/8, /*depthBits*/24, /*stencilBits*/8,
+                    /*nSamples*/0, /*glMajor*/4, /*glMinor*/1
+    )
 {
   // start GLEW extension handler
   glewInit();
@@ -34,6 +34,19 @@ Application<T>::Application()
 
   FormHelper *gui = new FormHelper(this);
   window_ = gui->addWindow(Eigen::Vector2i(10, 10), "Properties");
+
+  // -- Control --
+
+  gui->addGroup("Control");
+  auto* fbox = gui->addVariable("Time scale", settings_.timeScale);
+  fbox->setSpinnable(true);
+  fbox->setValueIncrement(0.05);
+
+  auto* cobo = gui->addVariable("FractalType", settings_.fractal);
+  cobo->setItems({"Popcorn 1", "Popcorn 2", "Popcorn 3", "Popcorn 4"});
+  cobo->setCallback([&](auto state) { this->update_value(settings_.fractal, state); });
+
+  // -- Parameters --
 
   gui->addGroup("Parameters");
   IntBox<unsigned>* box = gui->addVariable("Iterations", parameters_.max_iterations);
@@ -77,21 +90,22 @@ Application<T>::Application()
   coeffbox->setSpinnable(true);
   coeffbox->setCallback([&](auto v){this->update_value(parameters_.addValue, v);});
 
+  // -- Image --
 
   gui->addGroup("Image");
   gui_texWidth_ = gui->addVariable("texWidth", parameters_.width);
   gui_texWidth_->setCallback([&](auto v){
       if(tmp_texWidth_!=v) {
-	tmp_texWidth_ = v;
-	rescale_ = true;
+        tmp_texWidth_ = v;
+        rescale_ = true;
       }
     } );
   gui_texWidth_->setMinMaxValues(32, 2048);
   gui_texHeight_ = gui->addVariable("texHeight", parameters_.height);
   gui_texHeight_->setCallback([&](auto v){
       if(tmp_texHeight_!=v) {
-	tmp_texHeight_ = v;
-	rescale_ = true;
+        tmp_texHeight_ = v;
+        rescale_ = true;
       }
     } );
   gui_texHeight_->setMinMaxValues(32, 2048);
@@ -101,100 +115,135 @@ Application<T>::Application()
   auto* cobores = gui->addVariable("Resolution", resolution_);
   cobores->setItems({"S", "M", "SD", "720p", "1080p"});
   cobores->setCallback([&](Resolution state) {
-    if(state!=resolution_)
-    {
-      switch(state)
+      if(state!=resolution_)
       {
+        switch(state)
+        {
         case Resolution::SMALL: tmp_texHeight_ = tmp_texWidth_ = 400; break;
         case Resolution::MEDIUM: tmp_texHeight_ = tmp_texWidth_ = 800; break;
         case Resolution::SD: tmp_texHeight_ = 576; tmp_texWidth_ = 720; break;
         case Resolution::HD: tmp_texHeight_ = 720; tmp_texWidth_ = 1280; break;
         case Resolution::HD2: tmp_texHeight_ = 1080; tmp_texWidth_ = 1920; break;
+        }
+        gui_texWidth_->setValue(tmp_texWidth_);
+        gui_texHeight_->setValue(tmp_texHeight_);
+        resolution_ = state;
+        rescale_ = true;
       }
-      gui_texWidth_->setValue(tmp_texWidth_);
-      gui_texHeight_->setValue(tmp_texHeight_);
-      resolution_ = state;
-      rescale_ = true;
-    }
-  });
+    });
   gui->addVariable("ImgOutputDir", settings_.outputDir);
   gui->addVariable("ImgPrefix", settings_.prefix);
 
-  gui->addGroup("Coloring");
-  auto* hsbbox = gui->addVariable("HSL Mode", settings_.hslMode);
-  hsbbox->setCallback([&](auto v){this->update_value(settings_.hslMode, v);} );
-
-  Slider *slider = new Slider(gui->window());
-  slider->setValue(0.0f);
-  slider->setFixedWidth(80);
-  slider->setFinalCallback([&](float v){this->update_value(parameters_.hueOffset, v); });
-  gui->addWidget("Hue", slider);
-
-
-  gui->addGroup("Control");
-  auto* fbox = gui->addVariable("Time scale", settings_.timeScale);
-  fbox->setSpinnable(true);
-  fbox->setValueIncrement(0.05);
-
-  auto* cobo = gui->addVariable("Fractal", settings_.fractal);
-  cobo->setItems({"Popcorn 1", "Popcorn 2", "Popcorn 3", "Popcorn 4"});
-  cobo->setCallback([&](auto state) { this->update_value(settings_.fractal, state); });
-
-  gui->addButton("Screenshot", [&](){screenshot_=true;});
-  Button* button = btnAnimate_ = gui->addButton("Animate", nullptr);
+  gui->addButton("Screenshot [s]", [&](){screenshot_=true;});
+  Button* button = btnAnimate_ = gui->addButton("Animate [a]", nullptr);
   button->setFlags(Button::ToggleButton);
   button->setChangeCallback([&](bool state){
       settings_.animation=state;
       if(state==false)
-	recompute();
+        recompute();
       labelStatus_->setCaption("");
     });
 
-  // status window
+
+  // -- Status Window --
+
   window_status_ = new Window(this, "Status");
   window_status_->setLayout(new BoxLayout(Orientation::Vertical,
-                                         Alignment::Minimum, 4, 6));
-  (new Label(window_status_, "Keys: a .. animate | m .. menu", "sans-bold", 16));
+                                          Alignment::Minimum, 4, 6));
+  (new Label(window_status_, "Press m to hide menu.", "sans-bold", 16));
   labelPosition_ = new Label(window_status_, " ", "sans-bold", 16);
   labelPosition_->setColor(nanogui::Color(150,255));
   labelStatus_ = new Label(window_status_, " ", "sans-bold", 16);
   labelStatus_->setColor(nanogui::Color(30,205,30,255));
-  window_status_->setFixedSize(Eigen::Vector2i(240,90));
+  window_status_->setFixedSize(Eigen::Vector2i(260,90));
+
+  // -- Coloring --
+
+  window_shading_ = gui->addWindow(Eigen::Vector2i(10, 10), "Shading");
+  window_shading_->setWidth(220);
+
+  gui->addGroup("Colors");
+  auto* cbox = gui->addVariable("HSL Mode", settings_.hslMode);
+  cbox->setCallback([&](auto v){this->update_value(settings_.hslMode, v);} );
+
+  // Slider *slider = new Slider(gui->window());
+  // slider->setValue(0.0f);
+  // slider->setFixedWidth(80);
+  // slider->setFinalCallback([&](float v){this->update_value(parameters_.hue_start, v); });
+  // gui->addWidget("Hue", slider);
+
+  auto* vbox = gui->addVariable("HueStart", parameters_.hue_start);
+  vbox->setCallback([&](auto v){this->update_value(parameters_.hue_start, v); });
+  vbox->setSpinnable(true);
+  vbox->setMinMaxValues(-1.0, 1.0);
+  vbox->setValueIncrement(0.05);
+
+  vbox = gui->addVariable("HueEnd", parameters_.hue_end);
+  vbox->setCallback([&](auto v){this->update_value(parameters_.hue_end, v); });
+  vbox->setSpinnable(true);
+  vbox->setMinMaxValues(-1.0, 1.0);
+  vbox->setValueIncrement(0.05);
+
+  vbox = gui->addVariable("HueSlope", parameters_.hue_slope);
+  vbox->setCallback([&](auto v){this->update_value(parameters_.hue_slope, v); });
+  vbox->setSpinnable(true);
+  vbox->setValueIncrement(0.05);
+
+  vbox = gui->addVariable("DensitySlope", parameters_.density_slope);
+  vbox->setCallback([&](auto v){this->update_value(parameters_.density_slope, v); });
+  vbox->setSpinnable(true);
+  vbox->setValueIncrement(0.05);
+
+  vbox = gui->addVariable("SaturationSlope", parameters_.saturation_slope);
+  vbox->setCallback([&](auto v){this->update_value(parameters_.saturation_slope, v); });
+  vbox->setSpinnable(true);
+  vbox->setValueIncrement(0.05);
+
+  vbox = gui->addVariable("BrightnessSlope", parameters_.brightness_slope);
+  vbox->setCallback([&](auto v){this->update_value(parameters_.brightness_slope, v); });
+  vbox->setSpinnable(true);
+  vbox->setValueIncrement(0.05);
+
+
+  cbox = gui->addVariable("Invert", parameters_.invert);
+  cbox->setCallback([&](auto v){this->update_value(parameters_.invert, v); });
+  cbox = gui->addVariable("UseAtomics", parameters_.use_atomics);
+  cbox->setCallback([&](auto v){this->update_value(parameters_.use_atomics, v); });
+  // --
 
   performLayout();
 
-  window_->setPosition(Vector2i(0, height()-window_->height()));
-  window_status_->setPosition(Vector2i(width()-window_status_->width(), height()-window_status_->height()));
+  resizeEvent(Vector2i(0,0)); // initial window positions
 
   // FPS thread
   std::thread([&]()
-  {
-    while (1)
-    {
-      std::ostringstream ss;
-      ss << "Time: " << std::fixed << std::setprecision(3) << parameters_.time
-         << std::setprecision(1) << "    [" << fps_ << " FPS]";
-      window_status_->setTitle( ss.str() );
-      ss.str("");
-      ss.clear();
-      ss << "(x0, x1): " << std::fixed << std::setprecision(2)
-         << parameters_.x0 << ", " << parameters_.x1
-         << " (y0, y1): "
-         << parameters_.y0 << ", " << parameters_.y1;
-      labelPosition_->setCaption(ss.str());
-      if(settings_.animation) {
-        ss.str("");
-        ss.clear();
-        ss << "Kernel: " << std::fixed << std::setprecision(1) << ms_kernel_ <<" ms";
-        labelStatus_->setCaption(ss.str());
-      }
-      std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-      if(app_started_==false) {
-	recompute();
-	app_started_ = true;
-      }
-    }
-  }).detach();
+              {
+                while (1)
+                {
+                  std::ostringstream ss;
+                  ss << "Time: " << std::fixed << std::setprecision(3) << parameters_.time
+                     << std::setprecision(1) << "    [" << fps_ << " FPS]";
+                  window_status_->setTitle( ss.str() );
+                  ss.str("");
+                  ss.clear();
+                  ss << "(x0, x1): " << std::fixed << std::setprecision(2)
+                     << parameters_.x0 << ", " << parameters_.x1
+                     << " (y0, y1): "
+                     << parameters_.y0 << ", " << parameters_.y1;
+                  labelPosition_->setCaption(ss.str());
+                  if(settings_.animation) {
+                    ss.str("");
+                    ss.clear();
+                    ss << "Kernel: " << std::fixed << std::setprecision(1) << ms_kernel_ <<" ms";
+                    labelStatus_->setCaption(ss.str());
+                  }
+                  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                  if(app_started_==false) {
+                    recompute();
+                    app_started_ = true;
+                  }
+                }
+              }).detach();
 
   cout << "> Initialization done." << endl;
 }
@@ -233,33 +282,33 @@ void Application<T>::runCuda()
     init_buffer(ddata_, parameters_);
 
   switch(settings_.fractal) {
-    case Fractal::POPCORN0:
-      if(settings_.hslMode)
-	ms_kernel_ = launch_kernel<0,true>(resource_, ddata_, parameters_, iterations_offset_);
-      else
-	ms_kernel_ = launch_kernel<0,false>(resource_, ddata_, parameters_, iterations_offset_);
-      break;
-    case Fractal::POPCORN1:
-      if(settings_.hslMode)
-	ms_kernel_ = launch_kernel<1,true>(resource_, ddata_, parameters_, iterations_offset_);
-      else
-	ms_kernel_ = launch_kernel<1,false>(resource_, ddata_, parameters_, iterations_offset_);
-      break;
-    case Fractal::POPCORN2:
-      if(settings_.hslMode)
-	ms_kernel_ = launch_kernel<2,true>(resource_, ddata_, parameters_, iterations_offset_);
-      else
-	ms_kernel_ = launch_kernel<2,false>(resource_, ddata_, parameters_, iterations_offset_);
-      break;
-    case Fractal::POPCORN3:
-      if(settings_.hslMode)
-	ms_kernel_ = launch_kernel<3,true>(resource_, ddata_, parameters_, iterations_offset_);
-      else
-	ms_kernel_ = launch_kernel<3,false>(resource_, ddata_, parameters_, iterations_offset_);
-      break;
-    case Fractal::_COUNT:
-    default:
-      return;
+  case Fractal::POPCORN0:
+    if(settings_.hslMode)
+      ms_kernel_ = launch_kernel<0,true>(resource_, ddata_, parameters_, iterations_offset_);
+    else
+      ms_kernel_ = launch_kernel<0,false>(resource_, ddata_, parameters_, iterations_offset_);
+    break;
+  case Fractal::POPCORN1:
+    if(settings_.hslMode)
+      ms_kernel_ = launch_kernel<1,true>(resource_, ddata_, parameters_, iterations_offset_);
+    else
+      ms_kernel_ = launch_kernel<1,false>(resource_, ddata_, parameters_, iterations_offset_);
+    break;
+  case Fractal::POPCORN2:
+    if(settings_.hslMode)
+      ms_kernel_ = launch_kernel<2,true>(resource_, ddata_, parameters_, iterations_offset_);
+    else
+      ms_kernel_ = launch_kernel<2,false>(resource_, ddata_, parameters_, iterations_offset_);
+    break;
+  case Fractal::POPCORN3:
+    if(settings_.hslMode)
+      ms_kernel_ = launch_kernel<3,true>(resource_, ddata_, parameters_, iterations_offset_);
+    else
+      ms_kernel_ = launch_kernel<3,false>(resource_, ddata_, parameters_, iterations_offset_);
+    break;
+  case Fractal::_COUNT:
+  default:
+    return;
   }
 }
 
@@ -291,10 +340,10 @@ void Application<T>::draw(NVGcontext* ctx)
     }catch(const std::runtime_error& e){
       using namespace nanogui;
       new MessageDialog(
-          this,
-          MessageDialog::Type::Warning,
-          "Could not save image!",
-          std::string("Error: ")+e.what());
+        this,
+        MessageDialog::Type::Warning,
+        "Could not save image!",
+        std::string("Error: ")+e.what());
     }
     screenshot_ = false;
   }
@@ -314,8 +363,8 @@ void Application<T>::draw(NVGcontext* ctx)
       runCuda();
       iterations_offset_ += parameters_.iterations_per_run;
       if( iterations_offset_ >= parameters_.max_iterations) {
-	iterations_offset_ = 0;
-	recompute_ = false;
+        iterations_offset_ = 0;
+        recompute_ = false;
       }
     }
   }
@@ -341,7 +390,7 @@ void Application<T>::drawContents()
   // Note: NULL indicates the data resides in device memory
   // hence data is coming from PBO
   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, parameters_.width, parameters_.height,
-      GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+                  GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
   shader_.bind();
   glBindVertexArray(vertexArrayQuad_);
@@ -400,6 +449,7 @@ bool Application<T>::keyboardEvent(int key, int scancode, int action, int modifi
   {
     window_->setVisible(!window_->visible());
     window_status_->setVisible(!window_status_->visible());
+    window_shading_->setVisible(!window_shading_->visible());
     return true;
   }
   if (key == GLFW_KEY_S && action == GLFW_PRESS)
@@ -418,21 +468,21 @@ void Application<T>::create_quad()
     float texcoord[2];
     float normal[3];
   } quad[4] = {{
-    {-1.f,-1.f, 0.f, 1.0f}, //vertex
-     {0.f, 0.f},            //texcoord
-     {0.f, 0.f, 1.0f}       //normal
+      {-1.f,-1.f, 0.f, 1.0f}, //vertex
+      {0.f, 0.f},            //texcoord
+      {0.f, 0.f, 1.0f}       //normal
     },{
-     {-1.f, 1.f, 0.f, 1.0f},
-     {0.f, 1.f},
-     {0.f, 0.f, 1.0f}
+      {-1.f, 1.f, 0.f, 1.0f},
+      {0.f, 1.f},
+      {0.f, 0.f, 1.0f}
     },{
-     {1.f, 1.f, 0.f, 1.0f},
-     {1.f, 1.f},
-     {0.f, 0.f, 1.0f}
+      {1.f, 1.f, 0.f, 1.0f},
+      {1.f, 1.f},
+      {0.f, 0.f, 1.0f}
     },{
-     {1.f,-1.f, 0.f, 1.0f},
-     {1.f, 0.f},
-     {0.f, 0.f, 1.0f}
+      {1.f,-1.f, 0.f, 1.0f},
+      {1.f, 0.f},
+      {0.f, 0.f, 1.0f}
     }
   };
 
@@ -448,12 +498,12 @@ void Application<T>::create_quad()
   };
 
   upload( quadFinalVBOId_, (char*)quad,
-                4*sizeof(struct VData),
-                GL_ARRAY_BUFFER, GL_STATIC_DRAW );
+          4*sizeof(struct VData),
+          GL_ARRAY_BUFFER, GL_STATIC_DRAW );
 
   upload( quadIBOId_, (char*)quadInd,
-                4*sizeof(GLushort),
-                GL_ELEMENT_ARRAY_BUFFER, GL_STATIC_DRAW );
+          4*sizeof(GLushort),
+          GL_ELEMENT_ARRAY_BUFFER, GL_STATIC_DRAW );
 
   //bind vertex array for quad
   glBindVertexArray(vertexArrayQuad_);
@@ -490,7 +540,7 @@ void Application<T>::create_buffers()
   }
   glBindTexture(GL_TEXTURE_2D, texId_);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, texwidth, texheight, 0,
-        GL_RGBA, GL_UNSIGNED_BYTE, 0);
+               GL_RGBA, GL_UNSIGNED_BYTE, 0);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glBindTexture(GL_TEXTURE_2D, 0);
@@ -515,15 +565,15 @@ void Application<T>::computeFPS()
   double currentTime = glfwGetTime();
   double delta = currentTime - lastTime;
   if ( delta >= 1.0 ){
-     fps_ = double(nbFrames) / delta;
-     nbFrames = 0;
-     lastTime = currentTime;
+    fps_ = double(nbFrames) / delta;
+    nbFrames = 0;
+    lastTime = currentTime;
   }
 }
 
 template<typename T>
 bool Application<T>::mouseMotionEvent(const Eigen::Vector2i& p,
-    const Eigen::Vector2i& rel, int btn, int mdf)
+                                      const Eigen::Vector2i& rel, int btn, int mdf)
 {
   Screen::mouseMotionEvent(p, rel, btn, mdf);
   if(mousePressed_) {
@@ -541,12 +591,13 @@ bool Application<T>::mouseMotionEvent(const Eigen::Vector2i& p,
 
 template<typename T>
 bool Application<T>::mouseButtonEvent(const Eigen::Vector2i& p, int button, bool down,
-    int modifiers)
+                                      int modifiers)
 {
   Screen::mouseButtonEvent(p, button, down, modifiers);
   if(down && button == GLFW_MOUSE_BUTTON_LEFT
-      && (window_->visible()==false || window_->contains(p)==false)
-      && (window_status_->visible()==false || window_status_->contains(p)==false)){
+     && (window_->visible()==false || window_->contains(p)==false)
+     && (window_status_->visible()==false || window_status_->contains(p)==false)
+     && (window_shading_->visible()==false || window_shading_->contains(p)==false)){
     mousePressed_ = true;
     setCursor(nanogui::Cursor::Crosshair);
   }else{
@@ -558,10 +609,12 @@ bool Application<T>::mouseButtonEvent(const Eigen::Vector2i& p, int button, bool
 
 template<typename T>
 bool Application<T>::scrollEvent(const Eigen::Vector2i& p,
-				 const Eigen::Vector2f& rel)
+                                 const Eigen::Vector2f& rel)
 {
   Screen::scrollEvent(p, rel);
-  if(window_->contains(p)==false && window_status_->contains(p)==false) {
+  if(window_->contains(p)==false &&
+     window_status_->contains(p)==false &&
+     window_shading_->contains(p)==false) {
     double vx = 1.0*p.x()/width();
     double vy = 1.0-1.0*p.y()/height();
 
@@ -581,8 +634,9 @@ template<typename T>
 inline bool
 Application<T>::resizeEvent(const Eigen::Vector2i& )
 {
-  window_->setPosition(Eigen::Vector2i(0, height()-window_->height()));
+  window_->setPosition(Eigen::Vector2i(0, height()-window_->height()+(height()>500?-100:0)));
   window_status_->setPosition(Eigen::Vector2i(width()-window_status_->width(), height()-window_status_->height()));
+  window_shading_->setPosition(Eigen::Vector2i((width()-window_shading_->width())/2, height()-window_shading_->height()));
   return true;
 }
 
