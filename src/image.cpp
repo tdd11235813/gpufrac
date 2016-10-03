@@ -1,6 +1,13 @@
 #include "image.h"
 #include "gl_globals.h"
 
+inline bool ends_with(std::string const & value, std::string const & ending)
+{
+  if (ending.size() > value.size()) return false;
+  return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
+}
+
+
 TGAImage::~TGAImage()
 {
   if (pixels_)
@@ -11,6 +18,8 @@ TGAImage::~TGAImage()
 TGAImage::TGAImage(const std::string& path, size_t width, size_t height)
   : path_(path), width_(width), height_(height)
 {
+  if(ends_with(path_,"/")==false)
+    path_ += "/";
   pixels_ = new Colour[width_ * height_];
 }
 
@@ -44,45 +53,67 @@ void TGAImage::setPixel(Colour inputcolor, size_t x, size_t y)
   pixels_[convert2dto1d(x, y)] = inputcolor;
 }
 
-std::string TGAImage::saveOpenGLBuffer(size_t width, size_t height, string outputDir, string prefix)
+std::string TGAImage::savePBO(int buffer_id, size_t width, size_t height, std::string outputDir, std::string prefix)
 {
-  static int counter = 0;
-  std::string floc = "";
-  outputDir += "/";
   TGAImage img(outputDir, width, height);
   unsigned char* rawptr = img.rawPointer();
-  if(!rawptr)
-  {
-    throw runtime_error("Could not get image raw pointer.");
+  if(!rawptr) {
+    throw std::runtime_error("Could not get image raw pointer.");
   }
-  glReadBuffer(GL_BACK);
-  glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)(rawptr));
-  if (CHECK_GLERROR() == GL_NO_ERROR && rawptr)
-  {
-    char imgfile[128];
-    do{
-      ++counter;
-      sprintf(imgfile, "%s%04i", prefix.c_str(), counter);
-    }while(img.exists(imgfile));
-    try{
-      img.save(imgfile);
-      floc = img.path() + imgfile + ".tga";
-    }catch(const std::runtime_error& e){
-      --counter;
-      throw std::runtime_error(std::string(e.what())+"\nDirectory could not be found.");
-    }
-  }else
-    throw runtime_error("Could not save image.");
-  return floc;
+  glBindBuffer(GL_PIXEL_PACK_BUFFER, buffer_id);
+  auto ptr = (unsigned char*)glMapBuffer(GL_PIXEL_PACK_BUFFER, GL_READ_ONLY);
+  if (ptr) {
+    memcpy(rawptr, ptr, 4*width*height*sizeof(unsigned char));
+    glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+  }
+  glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+  if (CHECK_GLERROR() != GL_NO_ERROR || !ptr) {
+
+    throw std::runtime_error("Could not save image (OpenGL Error).");
+  }
+  return img.saveByPrefix(prefix);
 }
 
-bool TGAImage::exists(string filename) {
+std::string TGAImage::saveOpenGLBuffer(size_t width, size_t height, std::string outputDir, std::string prefix)
+{
+  TGAImage img(outputDir, width, height);
+  unsigned char* rawptr = img.rawPointer();
+  if(!rawptr) {
+    throw std::runtime_error("Could not get image raw pointer.");
+  }
+  glReadBuffer(GL_FRONT);
+  glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)(rawptr));
+  if (CHECK_GLERROR() != GL_NO_ERROR ) {
+    throw std::runtime_error("Could not save image (OpenGL Error).");
+  }
+  return img.saveByPrefix(prefix);
+}
+
+bool TGAImage::exists(std::string filename) {
   std::string floc = path_ + filename + ".tga";
-  ifstream f(floc);
+  std::ifstream f(floc);
   return f.good();
 }
 
-void TGAImage::save(string filename)
+std::string TGAImage::saveByPrefix(std::string prefix) {
+  static int counter = 0;
+  std::string floc = "";
+  char imgfile[128];
+  do{
+    ++counter;
+    sprintf(imgfile, "%s%04i", prefix.c_str(), counter);
+  }while(exists(imgfile));
+  try{
+    save(imgfile);
+    floc = path() + imgfile + ".tga";
+  }catch(const std::runtime_error& e){
+    --counter;
+    throw std::runtime_error(std::string(e.what())+"\nDirectory could not be found.");
+  }
+  return floc;
+}
+
+void TGAImage::save(std::string filename)
 {
   //Error checking
   if (width_ == 0 || height_ == 0)
@@ -91,7 +122,7 @@ void TGAImage::save(string filename)
   }
 
   std::string floc = path_ + filename + ".tga";
-  ofstream o(floc, ios::out | ios::binary);
+  std::ofstream o(floc, std::ios::out | std::ios::binary);
   if (o.good() == false)
   {
     throw std::runtime_error("TGAImage::WriteImage: Could not open location: " + floc);

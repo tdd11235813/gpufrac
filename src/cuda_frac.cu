@@ -138,7 +138,7 @@ T funcY(T t, const T time, T xk, T yk, const Parameters<T>& params) {
   return yk;
 }
 
-template<unsigned TFuncId, bool TColoring, typename T>
+template<unsigned TFuncId, bool TColoring, bool TSubSamples, typename T>
 __global__
 void d_generate_pattern(
   Data<T> _data,
@@ -151,10 +151,11 @@ void d_generate_pattern(
   unsigned i,j;
   unsigned px, py;
   unsigned offset_ij;
-  T xk,yk;
+  T xk,yk, xk0, yk0;
   T width = _params.width;
   T height = _params.height;
   T t;
+
   for (i = blockIdx.y * blockDim.y + threadIdx.y;
        i < _params.height;
        i += blockDim.y * gridDim.y)
@@ -164,23 +165,53 @@ void d_generate_pattern(
          j += blockDim.x * gridDim.x)
     {
       offset_ij = j+i*_params.width;
-      xk = _data.buffer[offset_ij + 3*_params.n];
-      yk = _data.buffer[offset_ij + 4*_params.n];
+      xk0 = _data.buffer[offset_ij + 3*_params.n]; // already mapped into world space
+      yk0 = _data.buffer[offset_ij + 4*_params.n];
 
-      for(t=_iteration_start; t<_iteration_end; t+=_iteration_step_size) {
-        xk = funcX<TFuncId>(t, _params.time, xk, yk, _params);
-        yk = funcY<TFuncId>(t, _params.time, xk, yk, _params);
-        px = unmap(xk, _params.x0, _params.x1, width);
-        py = unmap(yk, _params.y0, _params.y1, height);
-        if (px<_params.width && py<_params.height) {
-          unsigned offset = px+py*_params.width;
-          T v = _params.addValue*powf(1.0f-t, _params.density_slope);
-          if(_params.use_atomics)
-            atomicAdd(_data.buffer+offset, v); // just density
-          else
-            _data.buffer[offset] += v;
+      if(TSubSamples) {
+
+        for(int dx=-1; dx<=1; ++dx) {
+          for(int dy=-1; dy<=1; ++dy) {
+            xk = xk0 + 0.5*T(dx)/_params.width*(_params.x1-_params.x0);
+            yk = yk0 + 0.5*T(dy)/_params.height*(_params.y1-_params.y0);
+            for(t=_iteration_start; t<_iteration_end; t+=_iteration_step_size) {
+              xk = funcX<TFuncId>(t, _params.time, xk, yk, _params);
+              yk = funcY<TFuncId>(t, _params.time, xk, yk, _params);
+              px = unmap(xk, _params.x0, _params.x1, width);
+              py = unmap(yk, _params.y0, _params.y1, height);
+              if (px<_params.width && py<_params.height) {
+                unsigned offset = px+py*_params.width;
+                T v = _params.addValue*powf(1.0f-t, _params.density_slope);
+                if(dx!=0||dy!=0)
+                  v *= 0.5;
+                if(_params.use_atomics)
+                  atomicAdd(_data.buffer+offset, v); // just density
+                else
+                  _data.buffer[offset] += v;
+              }
+            } // for
+          }
         }
-      } // for
+      }else{
+        xk = xk0;
+        yk = yk0;
+
+        for(t=_iteration_start; t<_iteration_end; t+=_iteration_step_size) {
+          xk = funcX<TFuncId>(t, _params.time, xk, yk, _params);
+          yk = funcY<TFuncId>(t, _params.time, xk, yk, _params);
+          px = unmap(xk, _params.x0, _params.x1, width);
+          py = unmap(yk, _params.y0, _params.y1, height);
+          if (px<_params.width && py<_params.height) {
+            unsigned offset = px+py*_params.width;
+            T v = _params.addValue*powf(1.0f-t, _params.density_slope);
+            if(_params.use_atomics)
+              atomicAdd(_data.buffer+offset, v); // just density
+            else
+              _data.buffer[offset] += v;
+          }
+        } // for
+      }
+
       _data.buffer[offset_ij + 3*_params.n] = xk;
       _data.buffer[offset_ij + 4*_params.n] = yk;
     }
@@ -210,6 +241,10 @@ void d_render_to_image(
         h = powf((_params.hue_end-_params.hue_start)*__saturatef(v), _params.hue_slope) + _params.hue_start;
       else
         h = powf((_params.hue_start-_params.hue_end)*(__saturatef(v)), _params.hue_slope) + _params.hue_end;
+      if(h<0.0f)
+        h += 1.0f;
+      else if(h>1.0f)
+        h -= 1.0f;
       s = __saturatef(powf(v, _params.saturation_slope));
       l = __saturatef(powf(v, _params.brightness_slope));
       if(_params.invert)
@@ -259,11 +294,12 @@ float launch_kernel(
                  (void**)&pos, &num_bytes, _dst));
 
     CHECK_CUDA(cudaEventRecord(custart));
-    if(_iteration_offset==0) {
-      d_generate_pattern<TFuncId, TColoring>
+
+    if(_params.sub_sampling) {
+      d_generate_pattern<TFuncId, TColoring, true>
         <<<blocks, threads>>>(_ddata, _params, it_start, it_end, it_step_size);
     }else{
-      d_generate_pattern<TFuncId, TColoring>
+      d_generate_pattern<TFuncId, TColoring, false>
         <<<blocks, threads>>>(_ddata, _params, it_start, it_end, it_step_size);
     }
 

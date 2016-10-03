@@ -12,8 +12,6 @@
 #include <fstream>
 #include <iostream>
 
-using namespace std;
-
 //data structures
 struct Colour
 {
@@ -40,9 +38,18 @@ public:
   //set individual pixels
   void setPixel(Colour inputcolor, size_t xposition, size_t yposition);
 
-  bool exists(string filename);
-  void save(string filename);
-  static std::string saveOpenGLBuffer(size_t width, size_t height, string outputDir="./", string prefix="img_");
+  bool exists(std::string filename);
+  void save(std::string filename);
+  std::string saveByPrefix(std::string prefix);
+  static std::string saveOpenGLBuffer(size_t width,
+                                      size_t height,
+                                      std::string outputDir="./",
+                                      std::string prefix="img_");
+  static std::string savePBO(int buffer_id,
+                             size_t width,
+                             size_t height,
+                             std::string outputDir="./",
+                             std::string prefix="img_");
 
 //General getters and setters
 

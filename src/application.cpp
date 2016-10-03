@@ -22,12 +22,12 @@ Application<T>::Application()
 {
   // start GLEW extension handler
   glewInit();
-  cout << "> Create OpenGL Buffers." << endl;
+  std::cout << "> Create OpenGL Buffers." << std::endl;
   create_buffers();
-  cout << "> Init Shaders." << endl;
+  std::cout << "> Init Shaders." << std::endl;
   create_shader();
   create_quad();
-  cout << "> Init Cuda Buffers." << endl;
+  std::cout << "> Init Cuda Buffers." << std::endl;
   initCuda(); // init data on gpu
 
   using namespace nanogui;
@@ -49,11 +49,17 @@ Application<T>::Application()
   // -- Parameters --
 
   gui->addGroup("Parameters");
-  IntBox<unsigned>* box = gui->addVariable("Iterations", parameters_.max_iterations);
+  IntBox<unsigned>* box = gui->addVariable("MaxIterations", parameters_.max_iterations);
   box->setCallback([&](auto v){this->update_value(parameters_.max_iterations, v); } );
+  box->setValueIncrement(32);
+  box->setSpinnable(true);
+  box->setMinValue(1);
+  box = gui->addVariable("Iterations", parameters_.iterations);
+  box->setCallback([&](auto v){this->update_value(parameters_.iterations, v); } );
   box->setValueIncrement(16);
   box->setSpinnable(true);
-  box->setMinMaxValues(1, 1024);
+  box->setMinValue(1);
+
 
   box = gui->addVariable("IterationsPerRun", parameters_.iterations_per_run);
   box->setCallback([&](auto v){this->update_value(parameters_.iterations_per_run, v); } );
@@ -166,6 +172,9 @@ Application<T>::Application()
   auto* cbox = gui->addVariable("HSL Mode", settings_.hslMode);
   cbox->setCallback([&](auto v){this->update_value(settings_.hslMode, v);} );
 
+  cbox = gui->addVariable("SubSampling", parameters_.sub_sampling);
+  cbox->setCallback([&](auto v){this->update_value(parameters_.sub_sampling, v);} );
+
   // Slider *slider = new Slider(gui->window());
   // slider->setValue(0.0f);
   // slider->setFixedWidth(80);
@@ -245,13 +254,13 @@ Application<T>::Application()
                 }
               }).detach();
 
-  cout << "> Initialization done." << endl;
+  std::cout << "> Initialization done." << std::endl;
 }
 
 template<typename T>
 Application<T>::~Application()
 {
-  cout << "> Teardown." << endl;
+  std::cout << "> Teardown." << std::endl;
   cleanup();
 }
 
@@ -332,10 +341,17 @@ void Application<T>::draw(NVGcontext* ctx)
 
   if(screenshot_){
     try{
-      auto s = TGAImage::saveOpenGLBuffer(parameters_.width,
-                                          parameters_.height,
+      // screenshot from OpenGL Frame
+/*      auto s = TGAImage::saveOpenGLBuffer(width(), //parameters_.width,
+                                          height(), //parameters_.height,
                                           settings_.outputDir,
                                           settings_.prefix);
+*/
+      auto s = TGAImage::savePBO(imagePBO_,
+                                 parameters_.width,
+                                 parameters_.height,
+                                 settings_.outputDir,
+                                 settings_.prefix);
       labelStatus_->setCaption(std::string("Saved to: ") + s);
     }catch(const std::runtime_error& e){
       using namespace nanogui;
@@ -362,10 +378,12 @@ void Application<T>::draw(NVGcontext* ctx)
     }else{ // animation is false, but recompute is true
       runCuda();
       iterations_offset_ += parameters_.iterations_per_run;
-      if( iterations_offset_ >= parameters_.max_iterations) {
+      if( iterations_offset_ >= parameters_.iterations) {
         iterations_offset_ = 0;
         recompute_ = false;
-      }
+        labelStatus_->setCaption("Finished!");
+      }else
+        labelStatus_->setCaption("Rendering ...");
     }
   }
   oldtime = current_time;
@@ -402,7 +420,7 @@ void Application<T>::drawContents()
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
   if (CHECK_GLERROR() != GL_NO_ERROR)
-    throw runtime_error("OpenGL error while drawing.");
+    throw std::runtime_error("OpenGL error while drawing.");
 }
 
 template<typename T>
@@ -553,7 +571,7 @@ void Application<T>::create_buffers()
 
   delete[] h;
   if (CHECK_GLERROR() != GL_NO_ERROR)
-    throw runtime_error("Could not create OpenGL buffers.");
+    throw std::runtime_error("Could not create OpenGL buffers.");
 }
 
 template<typename T>

@@ -37,10 +37,12 @@ struct Parameters
   unsigned width=800;
   unsigned height=800;
   unsigned max_iterations=64;
+  unsigned iterations=64;
   unsigned iterations_per_run=32;
   unsigned n=0;
   bool use_atomics = true;
   bool invert = false;
+  bool sub_sampling = false;
   T hue_start = 0.0;
   T hue_end   = 0.3;
   T hue_slope = 1.45;
