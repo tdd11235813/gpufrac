@@ -33,7 +33,8 @@ struct Parameters
   T y1= 6.0;
   T talpha = 0.1;
   T addValue = 0.01;
-  T time = 0.0;
+  T time = 0.0; // elapsed
+  T time_delta = 0.0; // time delta to last frame
   unsigned width=800;
   unsigned height=800;
   unsigned max_iterations=64;
@@ -86,15 +87,6 @@ void cleanup_cuda(Data<T>& ddata);
 
 // ----------------------------------------------------------------------------
 
-/// Data
-/*  T* backBuffer;
-  T* grid;
-  T* diffussionLeft;
-  T* diffussionRight;
-  T* blurBuffer;
-  T* bestVariation;
-  T* colorgrid;*/
-
 ///
 template<typename T>
 struct DataMc
@@ -120,8 +112,6 @@ struct DataMc
   T* SATs[2] = {nullptr, nullptr};
 };
 
-template<typename T>
-void upload_parameters(DataMc<T>&, const Parameters<T>& parameters);
 template<typename T>
 void init_buffer(DataMc<T>&,
                  const Parameters<T>& parameters,

@@ -339,14 +339,14 @@ __global__ void getBest(DataMc<T> _data, T* target, T* source, int level, unsign
  *
  */
 template<typename T>
-__global__ void advance(DataMc<T> _data, unsigned n)
+__global__ void advance(DataMc<T> _data, const Parameters<T> _params)
 {
   uint i=threadIdx.x + blockIdx.x * blockDim.x;
-  if (i >= n)
+  if (i >= _params.n)
     return;
-  T curStep = _data.stepSizes[_data.bestLevel[i]];
-  T* grid = PTR_GRID(_data.buffer, n);
-  T* colorgrid = PTR_COLORGRID(_data.buffer, n);
+  T curStep = _params.time_delta*_data.stepSizes[_data.bestLevel[i]];
+  T* grid = PTR_GRID(_data.buffer, _params.n);
+  T* colorgrid = PTR_COLORGRID(_data.buffer, _params.n);
   if (_data.direction[i])
   {
     grid[i] += curStep;
@@ -475,7 +475,7 @@ float launch_kernel(cudaGraphicsResource* dst,
     } // level
 
 
-    advance<T><<<blocks_1, threads_1>>>(_data, _params.n);
+    advance<T><<<blocks_1, threads_1>>>(_data, _params);
 
     find_min_max(grid, grid+_params.n, &gridmin, &gridmax);
     gridrange = 0.5*(gridmax - gridmin);
@@ -492,14 +492,41 @@ float launch_kernel(cudaGraphicsResource* dst,
   }
   return 0.0f;
 }
+
 /**
  *
  */
 template<typename T>
-void upload_parameters(
-  DataMc<T>& _data,
-  const Parameters<T>& _params)
+void init_buffer(DataMc<T>& _data,
+                 const Parameters<T>& _params,
+                 bool alloc)
 {
+  uint threads_1 = 128;
+  uint blocks_1 = (_params.n-1)/threads_1+1;
+
+  if(alloc)
+  {
+    if(_data.buffer)
+    {
+      CHECK_CUDA( cudaFree(_data.buffer) );
+      CHECK_CUDA( cudaFree(_data.bestLevel) );
+      CHECK_CUDA( cudaFree(_data.direction) );
+      CHECK_CUDA(cudaFree(devStates));
+      cfin(_data);
+    }
+    CHECK_CUDA( cudaMalloc((void**)(&_data.buffer), 7*_params.n*sizeof(T)) );
+
+    CHECK_CUDA( cudaMalloc((void**)(&_data.bestLevel), _params.n*sizeof(int)) );
+    CHECK_CUDA( cudaMalloc((void**)(&_data.direction), _params.n*sizeof(bool)) );
+
+    CHECK_CUDA( cudaMemset(PTR_BLUR(_data.buffer, _params.n), 0.0, _params.n*sizeof(T)));
+    CHECK_CUDA( cudaMemset(PTR_BESTVAR(_data.buffer, _params.n), 0.0, _params.n*sizeof(T)));
+    CHECK_CUDA( cudaMemset(PTR_COLORGRID(_data.buffer, _params.n), 0.0, _params.n*sizeof(T)));
+
+    CHECK_CUDA(cudaMalloc((void **)&devStates, _params.n * sizeof(curandState)));
+
+  }
+
   int radius;
   // Pos Most Sig Bit - 1
   int new_levels = (int) (
@@ -539,67 +566,8 @@ void upload_parameters(
     CHECK_CUDA(cudaMemcpy(_data.stepSizes, stepSizes, _data.levels*sizeof(T), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(_data.colorShift, colorShift, _data.levels*sizeof(T), cudaMemcpyHostToDevice));
   }
-
   delete[] stepSizes;
   delete[] colorShift;
-}
-
-/**
- *
- */
-template<typename T>
-void init_buffer(DataMc<T>& _data,
-                 const Parameters<T>& _params,
-                 bool alloc)
-{
-  uint threads_1 = 128;
-  uint blocks_1 = (_params.n-1)/threads_1+1;
-
-  if(alloc)
-  {
-    if(_data.buffer)
-    {
-      CHECK_CUDA( cudaFree(_data.buffer) );
-      CHECK_CUDA( cudaFree(_data.bestLevel) );
-      CHECK_CUDA( cudaFree(_data.direction) );
-      CHECK_CUDA(cudaFree(devStates));
-      cfin(_data);
-    }
-    CHECK_CUDA( cudaMalloc((void**)(&_data.buffer), 7*_params.n*sizeof(T)) );
-
-    CHECK_CUDA( cudaMalloc((void**)(&_data.bestLevel), _params.n*sizeof(int)) );
-    CHECK_CUDA( cudaMalloc((void**)(&_data.direction), _params.n*sizeof(bool)) );
-
-    CHECK_CUDA( cudaMemset(PTR_BLUR(_data.buffer, _params.n), 0.0, _params.n*sizeof(T)));
-    CHECK_CUDA( cudaMemset(PTR_BESTVAR(_data.buffer, _params.n), 0.0, _params.n*sizeof(T)));
-    CHECK_CUDA( cudaMemset(PTR_COLORGRID(_data.buffer, _params.n), 0.0, _params.n*sizeof(T)));
-
-    CHECK_CUDA(cudaMalloc((void **)&devStates, _params.n * sizeof(curandState)));
-
-/*
-    if(dtemps.radii)
-    {
-      delete[] temps.radii;
-      delete[] temps.stepSizes;
-      delete[] temps.colorShift;
-      CHECK_CUDA( cudaFree(dtemps.radii) );
-      CHECK_CUDA( cudaFree(dtemps.stepSizes) );
-      CHECK_CUDA( cudaFree(dtemps.colorShift) );
-    }
-
-    temps.radii       = new uint[temps.levels];
-    temps.stepSizes   = new float[temps.levels];
-    temps.colorShift  = new float[temps.levels];
-    CHECK_CUDA( cudaMalloc((void**)(&dtemps.radii), temps.levels*sizeof(uint)) );
-    CHECK_CUDA( cudaMalloc((void**)(&dtemps.stepSizes), temps.levels*sizeof(T)) );
-    CHECK_CUDA( cudaMalloc((void**)(&dtemps.colorShift), temps.levels*sizeof(T)) );
-    */
-  }
-
-  //float cosinus[] = { 0, cos(TWO_PI/1), cos(TWO_PI/2),  cos(TWO_PI/3),  cos(TWO_PI/4),  cos(TWO_PI/5),  cos(TWO_PI/6) };
-  //float sinus[] =  { 0, sin(TWO_PI/1), sin(TWO_PI/2),  sin(TWO_PI/3),  sin(TWO_PI/4),  sin(TWO_PI/5),  sin(TWO_PI/6) };
-  //CHECK_CUDA(cudaMemcpyToSymbol(dcosinus,cosinus,7*sizeof(float),0,cudaMemcpyHostToDevice));
-  //CHECK_CUDA(cudaMemcpyToSymbol(dsinus,sinus,7*sizeof(float),0,cudaMemcpyHostToDevice));
 
   setup_kernel<<<blocks_1, threads_1>>>(devStates);
   d_initialize<T><<<blocks_1,threads_1>>>(_data, _params, devStates);
@@ -768,8 +736,7 @@ void blur_sat(DataMc<T>& _data,
 
 
 
-template
-void upload_parameters<float>(DataMc<float>&, const Parameters<float>&);
+
 template
 void init_buffer<float>(DataMc<float>&, const Parameters<float>&, bool);
 template float launch_kernel(cudaGraphicsResource* dst,

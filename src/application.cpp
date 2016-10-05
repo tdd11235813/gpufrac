@@ -119,7 +119,7 @@ Application<T>::Application()
   tmp_texHeight_ = parameters_.height;
 
   auto* cobores = gui->addVariable("Resolution", resolution_);
-  cobores->setItems({"S", "M", "SD", "720p", "1080p"});
+  cobores->setItems({"S", "M", "SD", "720p", "1080p", "McCabe_S", "McCabe_M", "McCabe_L"});
   cobores->setCallback([&](Resolution state) {
       if(state!=resolution_)
       {
@@ -130,6 +130,9 @@ Application<T>::Application()
         case Resolution::SD: tmp_texHeight_ = 576; tmp_texWidth_ = 720; break;
         case Resolution::HD: tmp_texHeight_ = 720; tmp_texWidth_ = 1280; break;
         case Resolution::HD2: tmp_texHeight_ = 1080; tmp_texWidth_ = 1920; break;
+        case Resolution::MCCABE_SMALL: tmp_texHeight_ = tmp_texWidth_ = 512; break;
+        case Resolution::MCCABE_MEDIUM: tmp_texHeight_ = tmp_texWidth_ = 1024; break;
+        case Resolution::MCCABE_HIGH: tmp_texHeight_ = tmp_texWidth_ = 2048; break;
         }
         gui_texWidth_->setValue(tmp_texWidth_);
         gui_texHeight_->setValue(tmp_texHeight_);
@@ -350,8 +353,7 @@ void Application<T>::draw(NVGcontext* ctx)
     recompute();
   }else if(reset_buffer_){
     init_buffer(ddata_, parameters_);
-    init_buffer(ddata_mc_, parameters_, true);
-    upload_parameters(ddata_mc_, parameters_);
+    init_buffer(ddata_mc_, parameters_, false); // no alloc
     reset_buffer_=false;
   }
 
@@ -389,6 +391,7 @@ void Application<T>::draw(NVGcontext* ctx)
     double delta = settings_.timeScale * (current_time - oldtime);
     if(settings_.animation) {
       iterations_offset_ = 0;
+      parameters_.time_delta = delta;
       parameters_.time += delta;
       runCuda();
     }else{ // animation is false, but recompute is true
@@ -446,7 +449,6 @@ void Application<T>::initCuda()
   alloc_buffer(ddata_, parameters_);
   init_buffer(ddata_, parameters_);
   init_buffer(ddata_mc_, parameters_, true);
-  upload_parameters(ddata_mc_, parameters_);
 }
 
 template<typename T>
