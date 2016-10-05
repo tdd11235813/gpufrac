@@ -1,4 +1,4 @@
-#include "cuda_globals.h"
+#include "cuda_globals.hpp"
 
 constexpr static double PI = 3.141592653589793;
 static cudaEvent_t custart, cuend;

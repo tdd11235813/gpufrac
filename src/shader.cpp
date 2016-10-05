@@ -3,7 +3,7 @@
  * @author Matthias Werner
  * @sa http://11235813tdd.blogspot.de/
  *****************************************************************************/
-#include "shader.h"
+#include "shader.hpp"
 #include <fstream>
 #include <string>
 using std::ifstream;

@@ -5,7 +5,7 @@
  *      Author: mwerner
  */
 
-#include "application.h"
+#include "application.hpp"
 
 #include <cuda_gl_interop.h>
 #include <thread>

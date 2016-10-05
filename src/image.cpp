@@ -1,5 +1,5 @@
-#include "image.h"
-#include "gl_globals.h"
+#include "image.hpp"
+#include "gl_globals.hpp"
 
 inline bool ends_with(std::string const & value, std::string const & ending)
 {

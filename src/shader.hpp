@@ -8,7 +8,7 @@
 #ifndef SHADER_H__
 #define SHADER_H__
 
-#include "gl_globals.h"
+#include "gl_globals.hpp"
 #include <string>
 
 //Manages vertex and pixel shaders

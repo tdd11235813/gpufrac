@@ -1,4 +1,4 @@
-#include "cuda_globals.h"
+#include "cuda_globals.hpp"
 
 #include <thrust/device_vector.h>
 #include <thrust/extrema.h>

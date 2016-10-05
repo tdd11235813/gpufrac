@@ -1,4 +1,4 @@
-#include "application.h"
+#include "application.hpp"
 #include <nanogui/nanogui.h>
 
 #include <iostream>

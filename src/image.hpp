@@ -2,9 +2,9 @@
 #define __IMAGE_H__
 
 /*
- Original source from http://danielbeard.wordpress.com/2011/06/06/image-saving-code-c/
- with Bugfixes and some minor changes (2013/05/09).
- */
+ Original source from http://danielbeard.wordpress.com/2011/06/06/image-saving-code-c
+ with bugfixes and some further changes.
+*/
 
 //includes
 #include <vector>
@@ -79,8 +79,8 @@ private:
   //store the pixels
   Colour *pixels_ = nullptr;
   std::string path_ = "./";
-  size_t height_ = 0;
   size_t width_ = 0;
+  size_t height_ = 0;
 
   //convert 2D to 1D indexing
   size_t convert2dto1d(size_t x, size_t y) {

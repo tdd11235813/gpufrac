@@ -8,10 +8,10 @@
 #ifndef APPLICATION_H_
 #define APPLICATION_H_
 
-#include "gl_globals.h"
-#include "cuda_globals.h" // ... also simulation settings
-#include "shader.h"
-#include "image.h"
+#include "gl_globals.hpp"
+#include "cuda_globals.hpp" // ... also simulation settings
+#include "shader.hpp"
+#include "image.hpp"
 
 #include <mutex>
 #include <array>
@@ -26,11 +26,14 @@
 
 enum class Resolution {
   SMALL=0,
-    MEDIUM=1,
-    SD=2,
-    HD=3,
-    HD2=4
-    };
+  MEDIUM,
+  SD,
+  HD,
+  HD2,
+  MCCABE_SMALL,
+  MCCABE_MEDIUM,
+  MCCABE_HIGH
+};
 
 template<typename T>
 class Application : public nanogui::Screen
@@ -38,7 +41,7 @@ class Application : public nanogui::Screen
 public:
   Application();
   virtual
-    ~Application();
+  ~Application();
 
   virtual void draw(NVGcontext *ctx) override;
   virtual bool keyboardEvent(int key, int scancode, int action, int modifiers) override;
@@ -55,7 +58,7 @@ private:
   void recompute();
 
   template<typename U, typename V>
-    void update_value(U& target, V source) {
+  void update_value(U& target, V source) {
     if(target != source) {
       target = static_cast<U>(source);
       recompute();
