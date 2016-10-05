@@ -89,6 +89,7 @@ private:
 
   Parameters<T> parameters_;
   Data<T> ddata_;
+  DataMc<T> ddata_mc_;
   UserSetting settings_;
   double fps_ = 0.0;
   float ms_kernel_ = 0.0f;

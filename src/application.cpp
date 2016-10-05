@@ -43,7 +43,7 @@ Application<T>::Application()
   fbox->setValueIncrement(0.05);
 
   auto* cobo = gui->addVariable("FractalType", settings_.fractal);
-  cobo->setItems({"Popcorn 1", "Popcorn 2", "Popcorn 3", "Popcorn 4"});
+  cobo->setItems({"Popcorn 1", "Popcorn 2", "Popcorn 3", "Popcorn 4", "Turing McCabe"});
   cobo->setCallback([&](auto state) { this->update_value(settings_.fractal, state); });
 
   // -- Parameters --
@@ -267,12 +267,22 @@ Application<T>::~Application()
 template<typename T>
 void Application<T>::cleanup()
 {
-  if(ddata_.buffer) {
-    CHECK_CUDA(cudaStreamSynchronize(0));
+  CHECK_CUDA(cudaStreamSynchronize(0));
+  if(resource_) {
     CHECK_CUDA(cudaGraphicsUnregisterResource(resource_));
+    resource_ = 0;
+  }
+  if(ddata_.buffer) {
     cleanup_cuda(ddata_);
+  }
+  if(ddata_mc_.buffer) {
+    cleanup_cuda(ddata_mc_);
+  }
+  if(imagePBO_){
     glDeleteBuffers(1, &imagePBO_);
     imagePBO_=0;
+  }
+  if(texId_) {
     glDeleteTextures(1, &texId_);
     texId_=0;
   }
@@ -315,6 +325,9 @@ void Application<T>::runCuda()
     else
       ms_kernel_ = launch_kernel<3,false>(resource_, ddata_, parameters_, iterations_offset_);
     break;
+  case Fractal::MCCABE:
+    ms_kernel_ = launch_kernel(resource_, ddata_mc_, parameters_);
+    break;
   case Fractal::_COUNT:
   default:
     return;
@@ -330,12 +343,15 @@ void Application<T>::draw(NVGcontext* ctx)
     cleanup();
     parameters_.width = tmp_texWidth_;
     parameters_.height = tmp_texHeight_;
+    parameters_.n = parameters_.width*parameters_.height;
     create_buffers();
     initCuda();
     rescale_ = false;
     recompute();
   }else if(reset_buffer_){
     init_buffer(ddata_, parameters_);
+    init_buffer(ddata_mc_, parameters_, true);
+    upload_parameters(ddata_mc_, parameters_);
     reset_buffer_=false;
   }
 
@@ -429,6 +445,8 @@ void Application<T>::initCuda()
   parameters_.n = parameters_.width*parameters_.height;
   alloc_buffer(ddata_, parameters_);
   init_buffer(ddata_, parameters_);
+  init_buffer(ddata_mc_, parameters_, true);
+  upload_parameters(ddata_mc_, parameters_);
 }
 
 template<typename T>

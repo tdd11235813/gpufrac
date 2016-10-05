@@ -15,7 +15,7 @@ struct Data
 
 enum class Fractal {
     POPCORN0=0,
-    POPCORN1, POPCORN2, POPCORN3,
+    POPCORN1, POPCORN2, POPCORN3, MCCABE,
     _COUNT
 };
 
@@ -84,6 +84,55 @@ void init_buffer(
 template<typename T>
 void cleanup_cuda(Data<T>& ddata);
 
+// ----------------------------------------------------------------------------
+
+/// Data
+/*  T* backBuffer;
+  T* grid;
+  T* diffussionLeft;
+  T* diffussionRight;
+  T* blurBuffer;
+  T* bestVariation;
+  T* colorgrid;*/
+
+///
+template<typename T>
+struct DataMc
+{
+  T* buffer = nullptr;
+  int levels = -1;
+  int blurlevels = 1;
+  unsigned *radii = nullptr;
+  unsigned *radii_host = nullptr;
+  T *stepSizes = nullptr;
+  T *colorShift = nullptr;
+
+  int* bestLevel = nullptr;
+  bool* direction = nullptr; /*@todo check for other type*/
+
+  //T scale; // space zoom (scale)
+  T base = 2.0;
+  T stepScale = 0.002;
+  T stepOffset = 0.002;
+  float blurFactor = 1.0f;
+  int symmetry = 0;
+
+  T* SATs[2] = {nullptr, nullptr};
+};
+
+template<typename T>
+void upload_parameters(DataMc<T>&, const Parameters<T>& parameters);
+template<typename T>
+void init_buffer(DataMc<T>&,
+                 const Parameters<T>& parameters,
+                 bool alloc);
+template<typename T>
+float launch_kernel(cudaGraphicsResource* dst,
+                   DataMc<T>& ddata,
+                   const Parameters<T>& params);
+
+template<typename T>
+void cleanup_cuda(DataMc<T>& ddata);
 // ----------------------------------------------------------------------------
 
 
