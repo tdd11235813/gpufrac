@@ -60,6 +60,8 @@ struct UserSetting
   bool animation=false;
   bool vsync = false;
   double timeScale = 0.15;
+  int seed = 1234;
+  int mccabe_direction_mode = 0;
 
   std::string outputDir="output";
   std::string prefix="img_";
@@ -91,7 +93,13 @@ void cleanup_cuda(Data<T>& ddata);
 template<typename T>
 struct DataMc
 {
-  T* buffer = nullptr;
+  T* backBuffer = nullptr;
+  T* grid = nullptr;
+  T* diffusionLeft = nullptr;
+  T* diffusionRight = nullptr;
+  T* blurBuffer = nullptr;
+  T* bestVariation = nullptr;
+  T* colorgrid = nullptr;
   int levels = -1;
   int blurlevels = 1;
   unsigned *radii = nullptr;
@@ -100,7 +108,7 @@ struct DataMc
   T *colorShift = nullptr;
 
   int* bestLevel = nullptr;
-  bool* direction = nullptr; /*@todo check for other type*/
+  bool* direction = nullptr;
 
   //T scale; // space zoom (scale)
   T base = 2.0;
@@ -115,11 +123,12 @@ struct DataMc
 template<typename T>
 void init_buffer(DataMc<T>&,
                  const Parameters<T>& parameters,
-                 bool alloc);
+                 bool alloc, int seed);
 template<typename T>
 float launch_kernel(cudaGraphicsResource* dst,
-                   DataMc<T>& ddata,
-                   const Parameters<T>& params);
+                    DataMc<T>& ddata,
+                    const Parameters<T>& params,
+                    bool advance, int dirmode);
 
 template<typename T>
 void cleanup_cuda(DataMc<T>& ddata);
@@ -193,5 +202,6 @@ std::stringstream listCudaDevices() {
     info << "\"ID\"," << i << "," << getCUDADeviceInformations(i).str() << std::endl;
   return info;
 }
+
 
 #endif

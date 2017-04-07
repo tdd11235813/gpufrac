@@ -30,9 +30,7 @@ enum class Resolution {
   SD,
   HD,
   HD2,
-  MCCABE_SMALL,
-  MCCABE_MEDIUM,
-  MCCABE_HIGH
+  HDD2
 };
 
 template<typename T>

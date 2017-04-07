@@ -44,7 +44,9 @@ Application<T>::Application()
 
   auto* cobo = gui->addVariable("FractalType", settings_.fractal);
   cobo->setItems({"Popcorn 1", "Popcorn 2", "Popcorn 3", "Popcorn 4", "Turing McCabe"});
-  cobo->setCallback([&](auto state) { this->update_value(settings_.fractal, state); });
+  cobo->setCallback([&](auto state) {
+      this->update_value(settings_.fractal, state);
+    });
 
   // -- Parameters --
 
@@ -106,7 +108,7 @@ Application<T>::Application()
         rescale_ = true;
       }
     } );
-  gui_texWidth_->setMinMaxValues(32, 2048);
+  gui_texWidth_->setMinMaxValues(32, 4096);
   gui_texHeight_ = gui->addVariable("texHeight", parameters_.height);
   gui_texHeight_->setCallback([&](auto v){
       if(tmp_texHeight_!=v) {
@@ -114,12 +116,12 @@ Application<T>::Application()
         rescale_ = true;
       }
     } );
-  gui_texHeight_->setMinMaxValues(32, 2048);
+  gui_texHeight_->setMinMaxValues(32, 4096);
   tmp_texWidth_ = parameters_.width;
   tmp_texHeight_ = parameters_.height;
 
   auto* cobores = gui->addVariable("Resolution", resolution_);
-  cobores->setItems({"S", "M", "SD", "720p", "1080p", "McCabe_S", "McCabe_M", "McCabe_L"});
+  cobores->setItems({"S", "M", "SD", "720p", "1080p", "2160p"});
   cobores->setCallback([&](Resolution state) {
       if(state!=resolution_)
       {
@@ -130,9 +132,7 @@ Application<T>::Application()
         case Resolution::SD: tmp_texHeight_ = 576; tmp_texWidth_ = 720; break;
         case Resolution::HD: tmp_texHeight_ = 720; tmp_texWidth_ = 1280; break;
         case Resolution::HD2: tmp_texHeight_ = 1080; tmp_texWidth_ = 1920; break;
-        case Resolution::MCCABE_SMALL: tmp_texHeight_ = tmp_texWidth_ = 512; break;
-        case Resolution::MCCABE_MEDIUM: tmp_texHeight_ = tmp_texWidth_ = 1024; break;
-        case Resolution::MCCABE_HIGH: tmp_texHeight_ = tmp_texWidth_ = 2048; break;
+        case Resolution::HDD2: tmp_texHeight_ = 2160; tmp_texWidth_ = 3840; break;
         }
         gui_texWidth_->setValue(tmp_texWidth_);
         gui_texHeight_->setValue(tmp_texHeight_);
@@ -188,13 +188,13 @@ Application<T>::Application()
   vbox->setCallback([&](auto v){this->update_value(parameters_.hue_start, v); });
   vbox->setSpinnable(true);
   vbox->setMinMaxValues(-1.0, 1.0);
-  vbox->setValueIncrement(0.05);
+  vbox->setValueIncrement(0.01);
 
   vbox = gui->addVariable("HueEnd", parameters_.hue_end);
   vbox->setCallback([&](auto v){this->update_value(parameters_.hue_end, v); });
   vbox->setSpinnable(true);
   vbox->setMinMaxValues(-1.0, 1.0);
-  vbox->setValueIncrement(0.05);
+  vbox->setValueIncrement(0.01);
 
   vbox = gui->addVariable("HueSlope", parameters_.hue_slope);
   vbox->setCallback([&](auto v){this->update_value(parameters_.hue_slope, v); });
@@ -221,6 +221,46 @@ Application<T>::Application()
   cbox->setCallback([&](auto v){this->update_value(parameters_.invert, v); });
   cbox = gui->addVariable("UseAtomics", parameters_.use_atomics);
   cbox->setCallback([&](auto v){this->update_value(parameters_.use_atomics, v); });
+
+  gui->addGroup("McCabe");
+  vbox = gui->addVariable("Base", ddata_mc_.base);
+  vbox->setCallback([&](auto v){this->update_value(ddata_mc_.base, v); });
+  vbox->setSpinnable(true);
+  vbox->setValueIncrement(0.1);
+  vbox->setMinValue(1.1);
+
+  vbox = gui->addVariable("stepScale", ddata_mc_.stepScale);
+  vbox->setCallback([&](auto v){this->update_value(ddata_mc_.stepScale, v); });
+  vbox->setSpinnable(true);
+  vbox->setValueIncrement(0.001);
+
+  vbox = gui->addVariable("stepOffset", ddata_mc_.stepOffset);
+  vbox->setCallback([&](auto v){this->update_value(ddata_mc_.stepOffset, v); });
+  vbox->setSpinnable(true);
+  vbox->setValueIncrement(0.001);
+
+  vbox = gui->addVariable("blurFactor", ddata_mc_.blurFactor);
+  vbox->setCallback([&](auto v){this->update_value(ddata_mc_.blurFactor, v); });
+  vbox->setSpinnable(true);
+  vbox->setValueIncrement(0.5);
+
+  auto *ibox = gui->addVariable("Symmetry", ddata_mc_.symmetry);
+  ibox->setCallback([&](auto v){this->update_value(ddata_mc_.symmetry, v); });
+  ibox->setSpinnable(true);
+  ibox->setMinMaxValues(0,4);
+
+  ibox = gui->addVariable("DirectionMode", settings_.mccabe_direction_mode);
+  ibox->setCallback([&](auto v){this->update_value(settings_.mccabe_direction_mode, v); });
+  ibox->setSpinnable(true);
+  ibox->setMinMaxValues(0,2);
+
+  ibox = gui->addVariable("Seed", settings_.seed);
+  ibox->setCallback([&](auto v){this->update_value(settings_.seed, v); });
+  ibox->setSpinnable(true);
+  ibox->setMinValue(0);
+
+
+
   // --
 
   performLayout();
@@ -278,7 +318,7 @@ void Application<T>::cleanup()
   if(ddata_.buffer) {
     cleanup_cuda(ddata_);
   }
-  if(ddata_mc_.buffer) {
+  if(ddata_mc_.backBuffer) {
     cleanup_cuda(ddata_mc_);
   }
   if(imagePBO_){
@@ -295,6 +335,8 @@ template<typename T>
 void Application<T>::recompute() {
   recompute_ = true;
   iterations_offset_ = 0;
+  if(settings_.fractal == Fractal::MCCABE)
+    init_buffer(ddata_mc_, parameters_, false, settings_.seed);
 }
 
 template<typename T>
@@ -329,7 +371,7 @@ void Application<T>::runCuda()
       ms_kernel_ = launch_kernel<3,false>(resource_, ddata_, parameters_, iterations_offset_);
     break;
   case Fractal::MCCABE:
-    ms_kernel_ = launch_kernel(resource_, ddata_mc_, parameters_);
+    ms_kernel_ = launch_kernel(resource_, ddata_mc_, parameters_, settings_.animation, settings_.mccabe_direction_mode);
     break;
   case Fractal::_COUNT:
   default:
@@ -353,7 +395,7 @@ void Application<T>::draw(NVGcontext* ctx)
     recompute();
   }else if(reset_buffer_){
     init_buffer(ddata_, parameters_);
-    init_buffer(ddata_mc_, parameters_, false); // no alloc
+    init_buffer(ddata_mc_, parameters_, false, settings_.seed); // no alloc
     reset_buffer_=false;
   }
 
@@ -448,7 +490,7 @@ void Application<T>::initCuda()
   parameters_.n = parameters_.width*parameters_.height;
   alloc_buffer(ddata_, parameters_);
   init_buffer(ddata_, parameters_);
-  init_buffer(ddata_mc_, parameters_, true);
+  init_buffer(ddata_mc_, parameters_, true, settings_.seed);
 }
 
 template<typename T>

@@ -9,7 +9,8 @@ template<typename T>
 __device__
 unsigned unmap( T v, const T v0, const T v1, const T len)
 {
-  return static_cast<unsigned>( (v-v0)/(v1-v0)*len );
+  T r = (v-v0)/(v1-v0)*len;
+  return static_cast<unsigned>( r<1 ? 0xffffffff : r );
 }
 
 template<typename T>
@@ -19,12 +20,10 @@ T map( unsigned v, const T v0, const T v1, const T len)
   return static_cast<T>(v)/len*(v1-v0)+v0;
 }
 
-
 __device__ inline
 unsigned char toColor(float v) {
-  return static_cast<unsigned char>(255.0f*saturate(v));
+  return static_cast<unsigned char>(255.0f*__saturatef(v));
 }
-
 
 /// HSL [0:1] to RGB {0..255}, from http://stackoverflow.com/questions/4728581/hsl-image-adjustements-on-gpu
 __device__
@@ -277,7 +276,7 @@ float launch_kernel(
   int devId = 0;
   cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, devId);
 
-  dim3 threads( 16, 16 );
+  dim3 threads( 32, 4 );
   dim3 threads1d( 128 );
   dim3 blocks( 32*numSMs );
   size_t num_bytes;
