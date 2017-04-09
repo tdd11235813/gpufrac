@@ -32,7 +32,7 @@ struct Parameters
   T y0=-6.0;
   T y1= 6.0;
   T talpha = 0.1;
-  T addValue = 0.01;
+  T hit_value = 0.01;
   T time = 0.0; // elapsed
   T time_delta = 0.0; // time delta to last frame
   unsigned width=800;
@@ -44,6 +44,7 @@ struct Parameters
   bool use_atomics = true;
   bool invert = false;
   bool sub_sampling = false;
+  bool pixel_trace = false;
   T hue_start = 0.0;
   T hue_end   = 0.3;
   T hue_slope = 1.45;

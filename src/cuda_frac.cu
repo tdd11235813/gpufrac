@@ -10,7 +10,7 @@ __device__
 unsigned unmap( T v, const T v0, const T v1, const T len)
 {
   T r = (v-v0)/(v1-v0)*len;
-  return static_cast<unsigned>( r<1 ? 0xffffffff : r );
+  return static_cast<unsigned>( r<0.5 ? 0xffffffff : r );
 }
 
 template<typename T>
@@ -115,30 +115,32 @@ __global__ void d_clear_color(uchar4 *ptr, unsigned n)
 
 template<unsigned TFuncId, typename T>
 inline __device__
-T funcX(T t, const T time, T xk, T yk, const Parameters<T>& params) {
+T funcX(T t, T time, T talpha, T xk, T yk, const Parameters<T>& params) {
   switch(TFuncId) {
-  case 0: return xk+params.talpha*cos(params.t0+time+yk+cos(params.t1+time+PI*xk));
-  case 1: return t*yk+0.95f*xk-params.talpha*sin(0.7f*yk);//+sin(3.0f*0.7f*yk));
+  case 0: return xk+talpha*cos(params.t0+time+yk+cos(params.t1+time+PI*xk));
+  case 1: return t*yk+0.95f*xk-talpha*sin(0.7f*yk);//+sin(3.0f*0.7f*yk));
     // xk-hf(y+hf(x)), f(x)=sin(x+sin(3x))
-  case 2: return xk-params.talpha*sin( yk+params.talpha*sin(params.t0+time+xk+sin(params.t1+time+3.0*xk)) + sin(3.0*(yk+params.talpha*sin(params.t0+time+xk+sin(params.t1+time+3.0*xk)))) );
-  case 3: return xk-params.talpha*sin( params.t0+yk+time+sin(3*yk+params.t1+time+sin(2*yk+time)) );
+//  case 2: return xk-talpha*sin( yk+talpha*sin(params.t0+time+xk+sin(params.t1+time+3.0*xk)) + sin(3.0*(yk+talpha*sin(params.t0+time+xk+sin(params.t1+time+3.0*xk)))) );
+  case 2: return xk - talpha*sin( params.t1*yk + tan(params.t0*yk) + time);
+  case 3: return xk-talpha*sin( params.t0+yk+time+sin(3*yk+params.t1+time+sin(2*yk+time)) );
   }
   return xk;
 }
 
 template<unsigned TFuncId, typename T>
 inline __device__
-T funcY(T t, const T time, T xk, T yk, const Parameters<T>& params) {
+T funcY(T t, T time, T talpha, T xk, T yk, const Parameters<T>& params) {
   switch(TFuncId) {
-  case 0: return yk+params.talpha*cos( params.t2+time+xk+cos(params.t3+time+PI*yk));
-  case 1: return t*xk+0.95f*yk+params.talpha*sin(0.6f*xk);//+sin(3.0f*0.6f*xk));
-  case 2: return yk+params.talpha*sin(params.t2+time+xk+sin(params.t3+time+3.0*xk));
-  case 3: return yk+params.talpha*sin( xk+params.t2+time+sin(3*xk+params.t3+time+sin(2*xk+time)) );
+  case 0: return yk+talpha*cos( params.t2+time+xk+cos(params.t3+time+PI*yk));
+  case 1: return t*xk+0.95f*yk+talpha*sin(0.6f*xk);//+sin(3.0f*0.6f*xk));
+//  case 2: return yk+talpha*sin(params.t2+time+xk+sin(params.t3+time+3.0*xk));
+  case 2: return yk - talpha*sin( params.t3*xk + tan(params.t2*xk) + time);
+  case 3: return yk+talpha*sin( xk+params.t2+time+sin(3*xk+params.t3+time+sin(2*xk+time)) );
   }
   return yk;
 }
 
-template<unsigned TFuncId, bool TColoring, bool TSubSamples, typename T>
+template<unsigned TFuncId, bool TPixelTrace, bool TSubSamples, typename T>
 __global__
 void d_generate_pattern(
   Data<T> _data,
@@ -148,77 +150,102 @@ void d_generate_pattern(
   const T _iteration_step_size
   )
 {
-  unsigned i,j;
+  unsigned i;
   unsigned px, py;
-  unsigned offset_ij;
   T xk,yk, xk0, yk0;
   T width = _params.width;
   T height = _params.height;
   T t;
 
-  for (i = blockIdx.y * blockDim.y + threadIdx.y;
-       i < _params.height;
-       i += blockDim.y * gridDim.y)
+  for (i = blockIdx.x * blockDim.x + threadIdx.x;
+       i < _params.n;
+       i += blockDim.x * gridDim.x)
   {
-    for (j = blockIdx.x * blockDim.x + threadIdx.x;
-         j < _params.width;
-         j += blockDim.x * gridDim.x)
-    {
-      offset_ij = j+i*_params.width;
-      xk0 = _data.buffer[offset_ij + 3*_params.n]; // already mapped into world space
-      yk0 = _data.buffer[offset_ij + 4*_params.n];
+    xk0 = _data.buffer[i + 3*_params.n]; // already mapped into world space
+    yk0 = _data.buffer[i + 4*_params.n];
 
-      if(TSubSamples) {
+    if(TSubSamples) {
 
-        for(int dx=-1; dx<=1; ++dx) {
-          for(int dy=-1; dy<=1; ++dy) {
-            xk = xk0 + 0.5*T(dx)/_params.width*(_params.x1-_params.x0);
-            yk = yk0 + 0.5*T(dy)/_params.height*(_params.y1-_params.y0);
-            for(t=_iteration_start; t<_iteration_end; t+=_iteration_step_size) {
-              xk = funcX<TFuncId>(t, _params.time, xk, yk, _params);
-              yk = funcY<TFuncId>(t, _params.time, xk, yk, _params);
-              px = unmap(xk, _params.x0, _params.x1, width);
-              py = unmap(yk, _params.y0, _params.y1, height);
-              if (px<_params.width && py<_params.height) {
-                unsigned offset = px+py*_params.width;
-                T v = _params.addValue*powf(1.0f-t, _params.density_slope);
-                if(dx!=0||dy!=0)
-                  v *= 0.5;
-                if(_params.use_atomics)
-                  atomicAdd(_data.buffer+offset, v); // just density
-                else
-                  _data.buffer[offset] += v;
-              }
-            } // for
+      for(int dx=-1; dx<=1; ++dx) {
+        for(int dy=-1; dy<=1; ++dy) {
+          xk = xk0 + 0.5*T(dx)/_params.width*(_params.x1-_params.x0);
+          yk = yk0 + 0.5*T(dy)/_params.height*(_params.y1-_params.y0);
+          for(t=_iteration_start; t<_iteration_end; t+=_iteration_step_size) {
+            xk = funcX<TFuncId>(t, _params.time, _params.talpha, xk, yk, _params);
+            yk = funcY<TFuncId>(t, _params.time, _params.talpha, xk, yk, _params);
+            px = unmap(xk, _params.x0, _params.x1, width);
+            py = unmap(yk, _params.y0, _params.y1, height);
+
+            if (px<_params.width && py<_params.height) {
+              unsigned offset = px+py*_params.width;
+              T v = _params.hit_value*powf(1.0f-t, _params.density_slope);
+              if(dx!=0||dy!=0)
+                v *= 0.5;
+              if(_params.use_atomics)
+                atomicAdd(_data.buffer+offset, v); // just density
+              else
+                _data.buffer[offset] += v;
+            }
+          } // for
+        }
+      }
+    }else{
+      xk = xk0;
+      yk = yk0;
+
+      if( TPixelTrace ) {
+//        if( (i&63)==0 && (j&63)==0 ) {
+//        if( (i&63)==0 && (j&63)==0 || (i&63)==1 && (j&63)==1) {
+//        if( (i&15)==0 && (j&15)==0 ) {
+        if( ((i%_params.width)&31)==0 && ((i/_params.width)&31)==0 ) {
+//          {
+//            _data.buffer[j+i*_params.width] = T(2.);
+          T time = pow(_params.time-floor(_params.time),_params.density_slope);
+//            T time = pow(0.25*cos(_params.time)+0.25, _params.density_slope);
+          for(t=_iteration_start; t<_iteration_end; t+=_iteration_step_size) {
+            xk = funcX<TFuncId>(t, T(0.), time, xk, yk, _params);
+            yk = funcY<TFuncId>(t, T(0.), time, xk, yk, _params);
+            px = unmap(xk, _params.x0, _params.x1, width);
+            py = unmap(yk, _params.y0, _params.y1, height);
+
+            if (px<_params.width && py<_params.height) {
+              unsigned offset = px+py*_params.width;
+//                T v = 0.5*(T(t)/_params.iterations)+0.33;
+              T v = 0.5*(T(t)/_iteration_end)+0.25;
+              if(_params.use_atomics)
+                atomicExch(_data.buffer+offset, v);
+              else
+                _data.buffer[offset] = v;
+            }
           }
         }
-      }else{
-        xk = xk0;
-        yk = yk0;
+      }
+      else {
 
         for(t=_iteration_start; t<_iteration_end; t+=_iteration_step_size) {
-          xk = funcX<TFuncId>(t, _params.time, xk, yk, _params);
-          yk = funcY<TFuncId>(t, _params.time, xk, yk, _params);
+          xk = funcX<TFuncId>(t, _params.time, _params.talpha, xk, yk, _params);
+          yk = funcY<TFuncId>(t, _params.time, _params.talpha, xk, yk, _params);
           px = unmap(xk, _params.x0, _params.x1, width);
           py = unmap(yk, _params.y0, _params.y1, height);
+
           if (px<_params.width && py<_params.height) {
             unsigned offset = px+py*_params.width;
-            T v = _params.addValue*powf(1.0f-t, _params.density_slope);
+            T v = _params.hit_value*powf(1.0f-t, _params.density_slope);
             if(_params.use_atomics)
               atomicAdd(_data.buffer+offset, v); // just density
             else
               _data.buffer[offset] += v;
           }
         } // for
-      }
+      } // TPixelTrace
+    } // TSubSamples
 
-      _data.buffer[offset_ij + 3*_params.n] = xk;
-      _data.buffer[offset_ij + 4*_params.n] = yk;
-    }
+    _data.buffer[i + 3*_params.n] = xk;
+    _data.buffer[i + 4*_params.n] = yk;
   }
 }
 
-template<bool TColoring, typename T>
+template<bool TColoring, bool TPixelTrace, typename T>
 __global__
 void d_render_to_image(
   uchar4 *_ptr,
@@ -231,8 +258,8 @@ void d_render_to_image(
        j < _params.n;
        j += blockDim.x * gridDim.x)
   {
-    if(TColoring)
-    {
+    if(TColoring) {
+
       T v = _data.buffer[j];
       float h;
       float s;
@@ -250,7 +277,27 @@ void d_render_to_image(
       if(_params.invert)
         l = 1.0f-l;
       hsl2rgb(h, s, l, _ptr[j]);
-    }else{
+    } else if(TPixelTrace) {
+
+      T v = 100*_params.hit_value*_data.buffer[j];
+      float h;
+      float s;
+      float l;
+      if(_params.hue_end>=_params.hue_start)
+        h = powf((_params.hue_end-_params.hue_start)*v, _params.hue_slope) + _params.hue_start;
+      else
+        h = powf((_params.hue_start-_params.hue_end)*v, _params.hue_slope) + _params.hue_end;
+      if(h<0.0f)
+        h += 1.0f;
+      else if(h>1.0f)
+        h -= 1.0f;
+      s = __saturatef(_params.saturation_slope);
+      l = __saturatef(v*_params.brightness_slope);
+      if(_params.invert)
+        l = 1.0f-l;
+      hsl2rgb(h, s, l, _ptr[j]);
+    } else {
+
       T density = sqrt(_data.buffer[j]);//exp(-data.buffer[j])
       _ptr[j].x = toColor( 1.0-0.3*powf(density,0.4) );
       _ptr[j].y = toColor( 1.0-0.5*powf(density,1.0) );
@@ -276,9 +323,9 @@ float launch_kernel(
   int devId = 0;
   cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, devId);
 
-  dim3 threads( 32, 4 );
+//  dim3 threads( 16, 16 );
   dim3 threads1d( 128 );
-  dim3 blocks( 32*numSMs );
+  dim3 blocks( 64*numSMs );
   size_t num_bytes;
   cudaError_t err;
   float ms = 0.0f;
@@ -295,17 +342,32 @@ float launch_kernel(
 
     CHECK_CUDA(cudaEventRecord(custart));
 
-    if(_params.sub_sampling) {
-      d_generate_pattern<TFuncId, TColoring, true>
-        <<<blocks, threads>>>(_ddata, _params, it_start, it_end, it_step_size);
-    }else{
-      d_generate_pattern<TFuncId, TColoring, false>
-        <<<blocks, threads>>>(_ddata, _params, it_start, it_end, it_step_size);
+    if(_params.pixel_trace) {
+      if(_params.sub_sampling) {
+        d_generate_pattern<TFuncId, true, true>
+          <<<blocks, threads1d>>>(_ddata, _params, it_start, it_end, it_step_size);
+      }else{
+        d_generate_pattern<TFuncId, true, false>
+          <<<blocks, threads1d>>>(_ddata, _params, it_start, it_end, it_step_size);
+      }
+    }else {
+      if(_params.sub_sampling) {
+        d_generate_pattern<TFuncId, false, true>
+          <<<blocks, threads1d>>>(_ddata, _params, it_start, it_end, it_step_size);
+      }else{
+        d_generate_pattern<TFuncId, false, false>
+          <<<blocks, threads1d>>>(_ddata, _params, it_start, it_end, it_step_size);
+      }
     }
 
     CHECK_CUDA(cudaEventRecord(cuend));
 
-    d_render_to_image<TColoring><<<blocks, threads1d>>>(pos, _ddata, _params);
+    if(_params.pixel_trace) {
+      d_render_to_image<TColoring, true><<<blocks, threads1d>>>(pos, _ddata, _params);
+    } else {
+      d_render_to_image<TColoring, false><<<blocks, threads1d>>>(pos, _ddata, _params);
+    }
+
 
     CHECK_CUDA( cudaEventSynchronize(cuend) );
     CHECK_CUDA( cudaEventElapsedTime(&ms, custart, cuend) );

@@ -15,7 +15,7 @@ template<typename T>
 Application<T>::Application()
   : nanogui::Screen(Eigen::Vector2i(1024, 768),
                     "Fractal Dynamic Systems",
-                    /*resizable*/true, /*fullscreen*/true, /*colorBits*/8,
+                    /*resizable*/true, /*fullscreen*/false, /*colorBits*/8,
                     /*alphaBits*/8, /*depthBits*/24, /*stencilBits*/8,
                     /*nSamples*/0, /*glMajor*/4, /*glMinor*/1
     )
@@ -92,11 +92,11 @@ Application<T>::Application()
   coeffbox->setSpinnable(true);
   coeffbox->setCallback([&](auto v){this->update_value(parameters_.talpha, v);});
 
-  coeffbox = gui->addVariable("Hit value", parameters_.addValue);
+  coeffbox = gui->addVariable("Hit value", parameters_.hit_value);
   coeffbox->setValueIncrement(0.001);
   coeffbox->setMinValue(0.001);
   coeffbox->setSpinnable(true);
-  coeffbox->setCallback([&](auto v){this->update_value(parameters_.addValue, v);});
+  coeffbox->setCallback([&](auto v){this->update_value(parameters_.hit_value, v);});
 
   // -- Image --
 
@@ -177,6 +177,9 @@ Application<T>::Application()
 
   cbox = gui->addVariable("SubSampling", parameters_.sub_sampling);
   cbox->setCallback([&](auto v){this->update_value(parameters_.sub_sampling, v);} );
+
+  cbox = gui->addVariable("PixelTrace", parameters_.pixel_trace);
+  cbox->setCallback([&](auto v){this->update_value(parameters_.pixel_trace, v);} );
 
   // Slider *slider = new Slider(gui->window());
   // slider->setValue(0.0f);
