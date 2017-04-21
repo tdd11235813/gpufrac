@@ -5,3 +5,5 @@ A GPU based fractal generator (CUDA, OpenGL) mostly featuring orbit-spaced fract
 - adjust parameters of fractals in realtime
 - advanced coloring
 - some fractals also support animation
+
+More screenshots on [deviantart](http://tdd11235813.deviantart.com/gallery/).
