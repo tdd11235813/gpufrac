@@ -1,4 +1,5 @@
 #include "cuda_globals.hpp"
+#include "fractal_mccabe.cuh"
 
 #include <thrust/device_vector.h>
 #include <thrust/extrema.h>
@@ -8,17 +9,6 @@
 // ---
 #include <cudpp.h>
 
-
-template<typename T>
-void cinit(DataMc<T>&, uint width, uint height);
-template<typename T>
-void cfin(DataMc<T>&);
-template<typename T>
-void blur_sat(DataMc<T>& _data,
-              T* target,
-              T* backBuffer,
-              T* source,
-              const Parameters<T>& );
 
 cudaEvent_t cstart, cend;
 size_t d_satPitch = 0;
@@ -37,6 +27,10 @@ curandStatePhilox4_32_10_t *devStates;
 // @todo T
 static constexpr float dsinus[]   = {0,0.0, 0.0,0.866025,1,0.951057,0.866025};
 static constexpr float dcosinus[] = {0,1.0,-1.0,-0.5,0,0.309017,0.5};
+
+
+
+using namespace Fractal::McCabe;
 
 
 __device__ inline
@@ -119,7 +113,7 @@ __global__ void d_setup_kernel(TRandState *state, uint n, int seed)
  * @todo to 4dim vec
  */
 template<typename T, typename TRandState>
-__global__ void d_initialize4( DataMc<T> _data,
+__global__ void d_initialize4( Data<T> _data,
                                const Parameters<T> _params,
                                TRandState *state,
                                uint n)
@@ -145,7 +139,7 @@ __global__ void d_initialize4( DataMc<T> _data,
  *
  */
 /*template<typename T, int TINVERT_MODE>
-__global__ void d_reset_pattern( DataMc<T> data, curandState *state, int radius )
+__global__ void d_reset_pattern( Data<T> data, curandState *state, int radius )
 {
   int ix = (threadIdx.x + blockIdx.x * blockDim.x);
   int iy = (threadIdx.y + blockIdx.y * blockDim.y);
@@ -203,7 +197,7 @@ __device__ int getSymmetry(int i, int ix, int iy, const Parameters<T>& _params)
  *
  */
 template<unsigned TSymmetry, typename T>
-__global__ void d_symmetry(DataMc<T> _data, const Parameters<T> _params)
+__global__ void d_symmetry(Data<T> _data, const Parameters<T> _params)
 {
   uint ix = (threadIdx.x + blockIdx.x * blockDim.x);
   uint iy = (threadIdx.y + blockIdx.y * blockDim.y);
@@ -271,7 +265,7 @@ __global__ void d_collect(T* to, T* buffer, uint radius, const Parameters<T> _pa
  *
  */
 template<typename T, bool TIsLevelZero>
-__global__ void d_getBest(DataMc<T> _data, T* target, T* source, int level, unsigned n)
+__global__ void d_getBest(Data<T> _data, T* target, T* source, int level, unsigned n)
 {
   unsigned i;
   for (i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -291,7 +285,7 @@ __global__ void d_getBest(DataMc<T> _data, T* target, T* source, int level, unsi
  * @tparam TDir 0==default, 1==neg.dir, 2==pos.dir
  */
 template<typename T, int TDir>
-__global__ void d_advance(DataMc<T> _data, const Parameters<T> _params)
+__global__ void d_advance(Data<T> _data, const Parameters<T> _params)
 {
   int i;
   T delta = 100.0*_params.time_delta;
@@ -369,16 +363,10 @@ __global__ void d_renderPattern(
   hsl2rgb_mccabe(h,s,l,ptr[i]);
 }
 
-/**
- *
- */
+
+
 template<typename T>
-float launch_kernel(cudaGraphicsResource* dst,
-                    DataMc<T>& _data,
-                    const Parameters<T>& _params,
-                    bool advance,
-                    int direction_mode)
-{
+float Runner<T>::launch_kernel(cudaGraphicsResource* dst, bool advance) {
   uchar4* pos;
   size_t num_bytes;
   uint radius;
@@ -386,12 +374,12 @@ float launch_kernel(cudaGraphicsResource* dst,
   float ms = 0.0f;
   int numSMs;
 
-  T* backbuffer = _data.backBuffer;
-  T* grid = _data.grid;
-  T* blurbuffer = _data.blurBuffer;
-  T* diffusion_right = _data.diffusionRight;
-  T* diffusion_left  = _data.diffusionLeft;
-  T* colorgrid  = _data.colorgrid;
+  T* backbuffer = data_.backBuffer;
+  T* grid = data_.grid;
+  T* blurbuffer = data_.blurBuffer;
+  T* diffusion_right = data_.diffusionRight;
+  T* diffusion_left  = data_.diffusionLeft;
+  T* colorgrid  = data_.colorgrid;
   T* source = grid;
   T* target = diffusion_right;
 
@@ -406,9 +394,9 @@ float launch_kernel(cudaGraphicsResource* dst,
 
     cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, 0);
     dim3 threads_1(128);
-    dim3 blocks_1( (_params.n-1)/threads_1.x+1 );
+    dim3 blocks_1( (params_.n-1)/threads_1.x+1 );
     dim3 threads_2(32, 4);
-    dim3 blocks_2((_params.width-1)/threads_2.x+1, (_params.height-1)/threads_2.y+1);
+    dim3 blocks_2((params_.width-1)/threads_2.x+1, (params_.height-1)/threads_2.y+1);
     dim3 blocks_1_sm( 32*numSMs );
 
     //d_clear_color<<<blocks_1,threads_1>>>(pos);
@@ -427,39 +415,39 @@ float launch_kernel(cudaGraphicsResource* dst,
       if(ff>7*250)
         ff = 0;
       if(M_CONTAINS_FLAG_TRUE(mode,M_INVERT_MODE))
-        d_reset_pattern<T,1><<<blocks_2, threads_2>>>(*_data, devStates, kradius );
+        d_reset_pattern<T,1><<<blocks_2, threads_2>>>(*data_, devStates, kradius );
       else
-        d_reset_pattern<T,0><<<blocks_2, threads_2>>>(*_data, devStates, kradius );
+        d_reset_pattern<T,0><<<blocks_2, threads_2>>>(*data_, devStates, kradius );
     }*/
 
     CHECK_CUDA(cudaEventRecord(cstart));
 
     if(advance) {
-      if(_data.symmetry>0)
+      if(params_.symmetry>0)
       {
-        CHECK_CUDA(cudaMemcpy(backbuffer, grid, _params.n*sizeof(T), cudaMemcpyDeviceToDevice));
-        switch(_data.symmetry) {
-        case 1: d_symmetry<2><<<blocks_2, threads_2>>>(_data, _params); break;
-        case 2: d_symmetry<3><<<blocks_2, threads_2>>>(_data, _params); break;
-        case 3: d_symmetry<4><<<blocks_2, threads_2>>>(_data, _params); break;
-        case 4: d_symmetry<5><<<blocks_2, threads_2>>>(_data, _params); break;
+        CHECK_CUDA(cudaMemcpy(backbuffer, grid, params_.n*sizeof(T), cudaMemcpyDeviceToDevice));
+        switch(params_.symmetry) {
+        case 1: d_symmetry<2><<<blocks_2, threads_2>>>(data_, params_); break;
+        case 2: d_symmetry<3><<<blocks_2, threads_2>>>(data_, params_); break;
+        case 3: d_symmetry<4><<<blocks_2, threads_2>>>(data_, params_); break;
+        case 4: d_symmetry<5><<<blocks_2, threads_2>>>(data_, params_); break;
         }
       }
 
-      for (int level = 0; level < _data.levels; level++)
+      for (int level = 0; level < data_.levels; level++)
       {
-        radius = _data.radii_host[level];
-        CHECK_CUDA(cudaMemcpy(backbuffer, blurbuffer, _params.n*sizeof(T), cudaMemcpyDeviceToDevice));
-        if(level<=_data.blurlevels){
-          blur_sat(_data, blurbuffer, backbuffer, source, _params);
+        radius = data_.radii_host[level];
+        CHECK_CUDA(cudaMemcpy(backbuffer, blurbuffer, params_.n*sizeof(T), cudaMemcpyDeviceToDevice));
+        if(level<=data_.blurlevels){
+          blur_sat(blurbuffer, backbuffer, source);
         }
 
-        d_collect<T><<<blocks_2,threads_2>>>(target, blurbuffer, radius, _params);
+        d_collect<T><<<blocks_2,threads_2>>>(target, blurbuffer, radius, params_);
         if(level==0)
-          d_getBest<T,true><<<blocks_1_sm, threads_1>>>(_data, target, source, level, _params.n);
+          d_getBest<T,true><<<blocks_1_sm, threads_1>>>(data_, target, source, level, params_.n);
         else
-          d_getBest<T,false><<<blocks_1_sm, threads_1>>>(_data, target, source, level, _params.n);
-        //        d_dumpToImage<<<blocks_1, threads_1>>>(pos, blurbuffer, _params);
+          d_getBest<T,false><<<blocks_1_sm, threads_1>>>(data_, target, source, level, params_.n);
+        //        d_dumpToImage<<<blocks_1, threads_1>>>(pos, blurbuffer, params_);
         if((level&1)==0)
         {
           source = target;
@@ -471,16 +459,16 @@ float launch_kernel(cudaGraphicsResource* dst,
       } // level
 
 
-      if(direction_mode==0)
-        d_advance<T,0><<<blocks_1_sm, threads_1>>>(_data, _params);
-      else if(direction_mode==1)
-        d_advance<T,1><<<blocks_1_sm, threads_1>>>(_data, _params);
+      if(params_.direction_mode==0)
+        d_advance<T,0><<<blocks_1_sm, threads_1>>>(data_, params_);
+      else if(params_.direction_mode==1)
+        d_advance<T,1><<<blocks_1_sm, threads_1>>>(data_, params_);
       else
-        d_advance<T,2><<<blocks_1_sm, threads_1>>>(_data, _params);
+        d_advance<T,2><<<blocks_1_sm, threads_1>>>(data_, params_);
 
-      find_min_max(grid, grid+_params.n, &gridmin, &gridmax);
+      find_min_max(grid, grid+params_.n, &gridmin, &gridmax);
       gridrange = 0.5*(gridmax - gridmin);
-      find_min_max(colorgrid, colorgrid+_params.n, &colormin, &colormax);
+      find_min_max(colorgrid, colorgrid+params_.n, &colormin, &colormax);
       colorrange = 0.5*(colormax - colormin);
     }else{
       gridmin = -1.f;
@@ -489,12 +477,12 @@ float launch_kernel(cudaGraphicsResource* dst,
       colorrange = 1.f;
     }
 
-    if(_params.invert)
+    if(params_.invert)
       d_renderPattern<true>
-        <<<blocks_1, threads_1>>>(pos, _params, grid, colorgrid, gridmin, gridrange, colormin, colorrange);
+        <<<blocks_1, threads_1>>>(pos, params_, grid, colorgrid, gridmin, gridrange, colormin, colorrange);
     else
       d_renderPattern<false>
-        <<<blocks_1, threads_1>>>(pos, _params, grid, colorgrid, gridmin, gridrange, colormin, colorrange);
+        <<<blocks_1, threads_1>>>(pos, params_, grid, colorgrid, gridmin, gridrange, colormin, colorrange);
 
     CHECK_CUDA( cudaEventRecord(cend) );
     CHECK_CUDA( cudaEventSynchronize(cend) );
@@ -505,153 +493,147 @@ float launch_kernel(cudaGraphicsResource* dst,
   return ms;
 }
 
-/**
- *
- */
+
 template<typename T>
-void init_buffer(DataMc<T>& _data,
-                 const Parameters<T>& _params,
-                 bool alloc,
-                 int seed)
-{
-  if(_data.base<=1.0)
+void Runner<T>::init_buffer(bool alloc) {
+  if(params_.base<=1.0)
     throw std::runtime_error("McCabe: invalid base value (must be > 1.0)");
 
   if(alloc)
   {
-    if(_data.backBuffer)
+    if(data_.backBuffer)
     {
-      CHECK_CUDA( cudaFree(_data.backBuffer) );
-      CHECK_CUDA( cudaFree(_data.grid) );
-      CHECK_CUDA( cudaFree(_data.diffusionLeft) );
-      CHECK_CUDA( cudaFree(_data.diffusionRight) );
-      CHECK_CUDA( cudaFree(_data.blurBuffer) );
-      CHECK_CUDA( cudaFree(_data.bestVariation) );
-      CHECK_CUDA( cudaFree(_data.colorgrid) );
-      CHECK_CUDA( cudaFree(_data.bestLevel) );
-      CHECK_CUDA( cudaFree(_data.direction) );
+      CHECK_CUDA( cudaFree(data_.backBuffer) );
+      CHECK_CUDA( cudaFree(data_.grid) );
+      CHECK_CUDA( cudaFree(data_.diffusionLeft) );
+      CHECK_CUDA( cudaFree(data_.diffusionRight) );
+      CHECK_CUDA( cudaFree(data_.blurBuffer) );
+      CHECK_CUDA( cudaFree(data_.bestVariation) );
+      CHECK_CUDA( cudaFree(data_.colorgrid) );
+      CHECK_CUDA( cudaFree(data_.bestLevel) );
+      CHECK_CUDA( cudaFree(data_.direction) );
       CHECK_CUDA(cudaFree(devStates));
       CHECK_CUDA(cudaEventDestroy(cstart));
       CHECK_CUDA(cudaEventDestroy(cend));
-      cfin(_data);
+      cfin();
     }
 
     CHECK_CUDA(cudaEventCreate(&cstart));
     CHECK_CUDA(cudaEventCreate(&cend));
 
-    CHECK_CUDA( cudaMalloc(&_data.backBuffer, _params.n*sizeof(T)) );
-    CHECK_CUDA( cudaMalloc(&_data.grid, _params.n*sizeof(T)) );
-    CHECK_CUDA( cudaMalloc(&_data.diffusionLeft, _params.n*sizeof(T)) );
-    CHECK_CUDA( cudaMalloc(&_data.diffusionRight, _params.n*sizeof(T)) );
-    CHECK_CUDA( cudaMalloc(&_data.blurBuffer, _params.n*sizeof(T)) );
-    CHECK_CUDA( cudaMalloc(&_data.bestVariation, _params.n*sizeof(T)) );
-    CHECK_CUDA( cudaMalloc(&_data.colorgrid, _params.n*sizeof(T)) );
+    CHECK_CUDA( cudaMalloc(&data_.backBuffer, params_.n*sizeof(T)) );
+    CHECK_CUDA( cudaMalloc(&data_.grid, params_.n*sizeof(T)) );
+    CHECK_CUDA( cudaMalloc(&data_.diffusionLeft, params_.n*sizeof(T)) );
+    CHECK_CUDA( cudaMalloc(&data_.diffusionRight, params_.n*sizeof(T)) );
+    CHECK_CUDA( cudaMalloc(&data_.blurBuffer, params_.n*sizeof(T)) );
+    CHECK_CUDA( cudaMalloc(&data_.bestVariation, params_.n*sizeof(T)) );
+    CHECK_CUDA( cudaMalloc(&data_.colorgrid, params_.n*sizeof(T)) );
 
-    CHECK_CUDA( cudaMalloc(&_data.bestLevel, _params.n*sizeof(int)) );
-    CHECK_CUDA( cudaMemset(_data.bestLevel, 0, _params.n*sizeof(int)));
+    CHECK_CUDA( cudaMalloc(&data_.bestLevel, params_.n*sizeof(int)) );
+    CHECK_CUDA( cudaMemset(data_.bestLevel, 0, params_.n*sizeof(int)));
 
-    CHECK_CUDA( cudaMalloc(&_data.direction, _params.n*sizeof(bool)) );
-    CHECK_CUDA( cudaMemset(_data.direction, 0, _params.n*sizeof(bool)));
+    CHECK_CUDA( cudaMalloc(&data_.direction, params_.n*sizeof(bool)) );
+    CHECK_CUDA( cudaMemset(data_.direction, 0, params_.n*sizeof(bool)));
 
-    CHECK_CUDA( cudaMemset(_data.blurBuffer, 0.0, _params.n*sizeof(T)));
-    CHECK_CUDA( cudaMemset(_data.diffusionLeft, 0.0, _params.n*sizeof(T)));
-    CHECK_CUDA( cudaMemset(_data.diffusionRight, 0.0, _params.n*sizeof(T)));
-    CHECK_CUDA( cudaMemset(_data.bestVariation, 0.0, _params.n*sizeof(T)));
-    CHECK_CUDA( cudaMemset(_data.colorgrid, 0.0, _params.n*sizeof(T)));
+    CHECK_CUDA( cudaMemset(data_.blurBuffer, 0.0, params_.n*sizeof(T)));
+    CHECK_CUDA( cudaMemset(data_.diffusionLeft, 0.0, params_.n*sizeof(T)));
+    CHECK_CUDA( cudaMemset(data_.diffusionRight, 0.0, params_.n*sizeof(T)));
+    CHECK_CUDA( cudaMemset(data_.bestVariation, 0.0, params_.n*sizeof(T)));
+    CHECK_CUDA( cudaMemset(data_.colorgrid, 0.0, params_.n*sizeof(T)));
 
-    CHECK_CUDA(cudaMalloc(&devStates, _params.n * sizeof(curandStatePhilox4_32_10_t)));
+    CHECK_CUDA(cudaMalloc(&devStates, params_.n * sizeof(curandStatePhilox4_32_10_t)));
 
   }
 
   int radius;
   // Pos Most Sig Bit - 1
-  int new_levels = (int) (logf(max(_params.width,_params.height)) / logf(_data.base)) - 1;
-  int new_blurlevels = (int) ((_data.levels+1.0f) * _data.blurFactor - 0.5f);
+  int new_levels = (int) (logf(max(params_.width,params_.height)) / logf(params_.base)) - 1;
+  int new_blurlevels = (int) ((data_.levels+1.0f) * params_.blurFactor - 0.5f);
   if(new_blurlevels<0)
     new_blurlevels=0;
 
-  if(_data.levels != new_levels)
+  if(data_.levels != new_levels)
   {
-    _data.levels     = new_levels;
-    _data.blurlevels = new_blurlevels;
+    data_.levels     = new_levels;
+    data_.blurlevels = new_blurlevels;
 
-    delete[] _data.radii_host;
-    CHECK_CUDA( cudaFree(_data.radii) );
-    CHECK_CUDA( cudaFree(_data.stepSizes) );
-    CHECK_CUDA( cudaFree(_data.colorShift) );
+    delete[] data_.radii_host;
+    CHECK_CUDA( cudaFree(data_.radii) );
+    CHECK_CUDA( cudaFree(data_.stepSizes) );
+    CHECK_CUDA( cudaFree(data_.colorShift) );
 
-    _data.radii_host = new unsigned[_data.levels];
-    CHECK_CUDA( cudaMalloc(&_data.radii, _data.levels*sizeof(unsigned)) );
-    CHECK_CUDA( cudaMalloc(&_data.stepSizes, _data.levels*sizeof(T)) );
-    CHECK_CUDA( cudaMalloc(&_data.colorShift, _data.levels*sizeof(T)) );
+    data_.radii_host = new unsigned[data_.levels];
+    CHECK_CUDA( cudaMalloc(&data_.radii, data_.levels*sizeof(unsigned)) );
+    CHECK_CUDA( cudaMalloc(&data_.stepSizes, data_.levels*sizeof(T)) );
+    CHECK_CUDA( cudaMalloc(&data_.colorShift, data_.levels*sizeof(T)) );
 
   }
 
-  auto* stepSizes   = new T[_data.levels];
-  auto* colorShift  = new T[_data.levels];
+  auto* stepSizes   = new T[data_.levels];
+  auto* colorShift  = new T[data_.levels];
 
-  for(int i=0; i<_data.levels; ++i)
+  for(int i=0; i<data_.levels; ++i)
   {
-    radius = (uint) pow(_data.base, i);
-    _data.radii_host[i] = radius;
-    stepSizes[i] = log(radius) * _data.stepScale + _data.stepOffset;
-    colorShift[i] = ((i & 0x01) == 0 ? -1.0 : 1.0) * (_data.levels-i);
+    radius = (uint) pow(params_.base, i);
+    data_.radii_host[i] = radius;
+    stepSizes[i] = log(radius) * params_.stepScale + params_.stepOffset;
+    colorShift[i] = ((i & 0x01) == 0 ? -1.0 : 1.0) * (data_.levels-i);
     //printf("i %d: r=%.3f, s=%.3f, c=%.3f\n",i, temps.radii[i], temps.stepSizes[i], temps.colorShift[i]);
-    CHECK_CUDA(cudaMemcpy(_data.radii, _data.radii_host, _data.levels*sizeof(uint), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(_data.stepSizes, stepSizes, _data.levels*sizeof(T), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(_data.colorShift, colorShift, _data.levels*sizeof(T), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(data_.radii, data_.radii_host, data_.levels*sizeof(uint), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(data_.stepSizes, stepSizes, data_.levels*sizeof(T), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(data_.colorShift, colorShift, data_.levels*sizeof(T), cudaMemcpyHostToDevice));
   }
   delete[] stepSizes;
   delete[] colorShift;
 
   if(alloc) {
-    uint n = (_params.n+3)/4;
+    uint n = (params_.n+3)/4;
     uint threads_1 = 128;
     uint blocks_1 = (n-1)/threads_1+1;
-    d_setup_kernel<<<blocks_1, threads_1>>>(devStates, n, seed);
-    d_initialize4<T><<<blocks_1,threads_1>>>(_data, _params, devStates, n);
+    d_setup_kernel<<<blocks_1, threads_1>>>(devStates, n, params_.seed);
+    d_initialize4<T><<<blocks_1,threads_1>>>(data_, params_, devStates, n);
     CHECK_LAST("Initialization failed.");
 
-    cinit(_data, _params.width, _params.height);
+    cinit();
   }
 }
 /**
  *
  */
 template<typename T>
-void cleanup_cuda(DataMc<T>& _data)
+void Runner<T>::cleanup_cuda()
 {
-  if(_data.backBuffer)
+  if(data_.backBuffer)
   {
-    CHECK_CUDA( cudaFree(_data.backBuffer) );
-    CHECK_CUDA( cudaFree(_data.grid) );
-    CHECK_CUDA( cudaFree(_data.diffusionLeft) );
-    CHECK_CUDA( cudaFree(_data.diffusionRight) );
-    CHECK_CUDA( cudaFree(_data.blurBuffer) );
-    CHECK_CUDA( cudaFree(_data.bestVariation) );
-    CHECK_CUDA( cudaFree(_data.colorgrid) );
-    CHECK_CUDA( cudaFree(_data.bestLevel) );
-    CHECK_CUDA( cudaFree(_data.direction) );
+    CHECK_CUDA( cudaFree(data_.backBuffer) );
+    CHECK_CUDA( cudaFree(data_.grid) );
+    CHECK_CUDA( cudaFree(data_.diffusionLeft) );
+    CHECK_CUDA( cudaFree(data_.diffusionRight) );
+    CHECK_CUDA( cudaFree(data_.blurBuffer) );
+    CHECK_CUDA( cudaFree(data_.bestVariation) );
+    CHECK_CUDA( cudaFree(data_.colorgrid) );
+    CHECK_CUDA( cudaFree(data_.bestLevel) );
+    CHECK_CUDA( cudaFree(data_.direction) );
     CHECK_CUDA(cudaEventDestroy(cstart));
     CHECK_CUDA(cudaEventDestroy(cend));
 
     CHECK_CUDA(cudaFree(devStates));
-    _data.backBuffer = nullptr;
-    cfin(_data);
+    data_.backBuffer = nullptr;
+    cfin();
   }
-  if(_data.radii)
+  if(data_.radii)
   {
-    delete[] _data.radii_host;
-    CHECK_CUDA( cudaFree(_data.radii) );
-    CHECK_CUDA( cudaFree(_data.stepSizes) );
-    CHECK_CUDA( cudaFree(_data.colorShift) );
-    _data.radii = nullptr;
-    _data.stepSizes = nullptr;
-    _data.colorShift = nullptr;
-    _data.radii_host = nullptr;
+    delete[] data_.radii_host;
+    CHECK_CUDA( cudaFree(data_.radii) );
+    CHECK_CUDA( cudaFree(data_.stepSizes) );
+    CHECK_CUDA( cudaFree(data_.colorShift) );
+    data_.radii = nullptr;
+    data_.stepSizes = nullptr;
+    data_.colorShift = nullptr;
+    data_.radii_host = nullptr;
   }
-  _data.levels = -1;
-  _data.symmetry = 0;
+  data_.levels = -1;
+  params_.symmetry = 0;
 }
 
 // ---
@@ -683,96 +665,103 @@ __global__ void d_transpose(T* dst, T* src, int dstPitch, int srcPitch, int widt
 }
 
 template<typename T>
-void cinit(DataMc<T>& _data, uint width, uint height)
+void Runner<T>::cinit()
 {
-    size_t dpitch   = width  * sizeof(T);
-    size_t dpitch_T = height * sizeof(T);
+  unsigned width = params_.width;
+  unsigned height = params_.height;
+  size_t dpitch   = width  * sizeof(T);
+  size_t dpitch_T = height * sizeof(T);
 
-    CHECK_LAST("Before CUDA initialization");
+  CHECK_LAST("Before CUDA initialization");
 
-    CHECK_CUDA( cudaMallocPitch( _data.SATs, &d_satPitch, dpitch, height));
-    CHECK_CUDA( cudaMallocPitch( _data.SATs+1, &d_satPitch_T, dpitch_T, width));
+  CHECK_CUDA( cudaMallocPitch( data_.SATs, &d_satPitch, dpitch, height));
+  CHECK_CUDA( cudaMallocPitch( data_.SATs+1, &d_satPitch_T, dpitch_T, width));
 
-    d_satPitchInElements   = d_satPitch   / sizeof(T);
-    d_satPitchInElements_T = d_satPitch_T / sizeof(T);
-    // Initialize CUDPP
-    cudppCreate(&theCudpp);
+  d_satPitchInElements   = d_satPitch   / sizeof(T);
+  d_satPitchInElements_T = d_satPitch_T / sizeof(T);
+  // Initialize CUDPP
+  cudppCreate(&theCudpp);
 }
 
 template<typename T>
-void cfin(DataMc<T>& _data)
+void Runner<T>::cfin()
 {
-  CHECK_CUDA(cudaFree(_data.SATs[0]));
-  CHECK_CUDA(cudaFree(_data.SATs[1]));
-  _data.SATs[0] = nullptr;
-  _data.SATs[1] = nullptr;
+  CHECK_CUDA(cudaFree(data_.SATs[0]));
+  CHECK_CUDA(cudaFree(data_.SATs[1]));
+  data_.SATs[0] = nullptr;
+  data_.SATs[1] = nullptr;
   // shut down CUDPP
   if (CUDPP_SUCCESS != cudppDestroy(theCudpp))
   {
-      printf("Error destroying CUDPP.\n");
+    printf("Error destroying CUDPP.\n");
   }
 }
 
 template<typename T>
-void blur_sat(DataMc<T>& _data,
-              T* _target,
-              T* _backBuffer,
-              T* _source,
-              const Parameters<T>& _params)
+void Runner<T>::blur_sat(T* _target,
+                         T* _backBuffer,
+                         T* _source)
 {
   dim3 threads_2(16, 16);
-  dim3 blocks_2  ((_params.width-1) / threads_2.x+1,
-                  (_params.height-1) / threads_2.y+1);
-  dim3 blocks_2_T((_params.height-1) / threads_2.x+1,
-                  (_params.width-1) / threads_2.y+1);
+  dim3 blocks_2  ((params_.width-1) / threads_2.x+1,
+                  (params_.height-1) / threads_2.y+1);
+  dim3 blocks_2_T((params_.height-1) / threads_2.x+1,
+                  (params_.width-1) / threads_2.y+1);
 
   CHECK_CUDA(
-      cudaMemcpy2D(_data.SATs[0], d_satPitch, _source, _params.width * sizeof(T),
-                   _params.width * sizeof(T), _params.height,
+      cudaMemcpy2D(data_.SATs[0], d_satPitch, _source, params_.width * sizeof(T),
+                   params_.width * sizeof(T), params_.height,
                    cudaMemcpyDeviceToDevice));
 
-  if (CUDPP_SUCCESS != cudppPlan(theCudpp, &scanPlan, config, _params.width, _params.height, d_satPitchInElements))
+  if (CUDPP_SUCCESS != cudppPlan(theCudpp, &scanPlan, config, params_.width, params_.height, d_satPitchInElements))
     fprintf(stderr, "Error creating CUDPPPlan.\n");
 
   // scan rows
-  cudppMultiScan(scanPlan, _data.SATs[0], _data.SATs[0], _params.width, _params.height);
+  cudppMultiScan(scanPlan, data_.SATs[0], data_.SATs[0], params_.width, params_.height);
 
   // transpose so columns become rows
-  d_transpose<T, 16> <<<blocks_2, threads_2, 0>>>(_data.SATs[1], _data.SATs[0],
+  d_transpose<T, 16> <<<blocks_2, threads_2, 0>>>(data_.SATs[1], data_.SATs[0],
                                                       d_satPitchInElements_T,
                                                       d_satPitchInElements,
-                                                      _params.width,
-                                                      _params.height);
+                                                      params_.width,
+                                                      params_.height);
 
   if (CUDPP_SUCCESS != cudppDestroyPlan(scanPlan))
     fprintf(stderr, "Error destroying CUDPPPlan.\n");
-  if (CUDPP_SUCCESS != cudppPlan(theCudpp, &scanPlan, config, _params.height, _params.width, d_satPitchInElements_T))
+  if (CUDPP_SUCCESS != cudppPlan(theCudpp, &scanPlan, config, params_.height, params_.width, d_satPitchInElements_T))
     fprintf(stderr, "Error creating CUDPPPlan.\n");
   // scan columns
-  cudppMultiScan(scanPlan, _data.SATs[1], _data.SATs[1], _params.height, _params.width);
+  cudppMultiScan(scanPlan, data_.SATs[1], data_.SATs[1], params_.height, params_.width);
 
   // transpose back
-  d_transpose<T, 16> <<<blocks_2_T, threads_2, 0>>>(_data.SATs[0], _data.SATs[1],
+  d_transpose<T, 16> <<<blocks_2_T, threads_2, 0>>>(data_.SATs[0], data_.SATs[1],
                                                         d_satPitchInElements,
                                                         d_satPitchInElements_T,
-                                                        _params.height,
-                                                        _params.width);
+                                                        params_.height,
+                                                        params_.width);
 
   if (CUDPP_SUCCESS != cudppDestroyPlan(scanPlan))
     fprintf(stderr, "Error destroying CUDPPPlan.\n");
-  d_blur_step2<<<blocks_2, threads_2>>>(_target, _backBuffer, _data.SATs[0],
-                                        d_satPitchInElements, _source, _params);
+  d_blur_step2<<<blocks_2, threads_2>>>(_target, _backBuffer, data_.SATs[0],
+                                        d_satPitchInElements, _source, params_);
 }
 
 
 
 
-template
-void init_buffer<float>(DataMc<float>&, const Parameters<float>&, bool, int);
-template float launch_kernel(cudaGraphicsResource* dst,
-                             DataMc<float>& ddata,
-                             const Parameters<float>& params,
-                             bool advance,
-                             int direction_mode);
-template
-void cleanup_cuda(DataMc<float>& ddata);
+// template
+// void init_buffer<float>(Data<float>&, const Parameters<float>&, bool, int);
+// template float launch_kernel(cudaGraphicsResource* dst,
+//                              Data<float>& ddata,
+//                              const Parameters<float>& params,
+//                              bool advance,
+//                              int direction_mode);
+// template
+// void cleanup_cuda(Data<float>& ddata);
+
+namespace Fractal {
+  namespace McCabe {
+    template
+    struct Runner<float>;
+  }
+}

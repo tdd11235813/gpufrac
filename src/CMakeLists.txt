@@ -26,7 +26,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang
   list(APPEND CMAKE_CXX_FLAGS "-std=gnu++14")
 endif ()
 
-find_package(CUDA)
+find_package(CUDA REQUIRED)
 include(FindCUDA)
 include_directories(${CUDA_INCLUDE_DIRS})
 
@@ -83,7 +83,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   list(APPEND CUDA_NVCC_FLAGS "-g -lineinfo")
 endif()
 
-cuda_add_executable(${PROJECT_NAME} cuda_frac.cu mccabe.cu main.cpp application.cpp image.cpp shader.cpp)
+cuda_add_executable(${PROJECT_NAME} fractal_popcorn.cu fractal_mccabe.cu main.cpp application.cpp image.cpp shader.cpp)
 target_link_libraries(${PROJECT_NAME}
   ${CUDA_LIBRARIES} ${OPENGL_LIBRARIES}
   nanogui ${NANOGUI_EXTRA_LIBS}

@@ -1,9 +1,19 @@
+#include "fractal_popcorn.cuh"
 #include "cuda_globals.hpp"
+
+
+#include <iostream>
 
 constexpr static double PI = 3.141592653589793;
 static cudaEvent_t custart, cuend;
 
+
 // ---
+
+
+namespace Fractal {
+  namespace Popcorn {
+
 
 template<typename T>
 __device__
@@ -117,12 +127,12 @@ template<unsigned TFuncId, typename T>
 inline __device__
 T funcX(T t, T time, T talpha, T xk, T yk, const Parameters<T>& params) {
   switch(TFuncId) {
-  case 0: return xk+talpha*cos(params.t0+time+yk+cos(params.t1+time+PI*xk));
-  case 1: return t*yk+0.95f*xk-talpha*sin(0.7f*yk);//+sin(3.0f*0.7f*yk));
+  case 0: return xk+talpha*cosf(params.t0+time+yk+cosf(params.t1+time+PI*xk));
+  case 1: return t*yk+0.95f*xk-talpha*sinf(0.7f*yk);//+sin(3.0f*0.7f*yk));
     // xk-hf(y+hf(x)), f(x)=sin(x+sin(3x))
 //  case 2: return xk-talpha*sin( yk+talpha*sin(params.t0+time+xk+sin(params.t1+time+3.0*xk)) + sin(3.0*(yk+talpha*sin(params.t0+time+xk+sin(params.t1+time+3.0*xk)))) );
-  case 2: return xk - talpha*sin( params.t1*yk + tan(params.t0*yk) + time);
-  case 3: return xk-talpha*sin( params.t0+yk+time+sin(3*yk+params.t1+time+sin(2*yk+time)) );
+  case 2: return xk - talpha*sinf( params.t1*yk + tanf(params.t0*yk) + time);
+  case 3: return xk-talpha*sinf( params.t0+yk+time+sinf(3*yk+params.t1+time+sinf(2*yk+time)) );
   }
   return xk;
 }
@@ -194,14 +204,9 @@ void d_generate_pattern(
       yk = yk0;
 
       if( TPixelTrace ) {
-//        if( (i&63)==0 && (j&63)==0 ) {
-//        if( (i&63)==0 && (j&63)==0 || (i&63)==1 && (j&63)==1) {
-//        if( (i&15)==0 && (j&15)==0 ) {
-        if( ((i%_params.width)&31)==0 && ((i/_params.width)&31)==0 ) {
-//          {
-//            _data.buffer[j+i*_params.width] = T(2.);
-          T time = pow(_params.time-floor(_params.time),_params.density_slope);
-//            T time = pow(0.25*cos(_params.time)+0.25, _params.density_slope);
+        if( ((i%_params.width)&3)==0 && ((i/_params.width)&3)==0 ) {
+
+          T time = sinf(_params.time) * _params.density_slope;
           for(t=_iteration_start; t<_iteration_end; t+=_iteration_step_size) {
             xk = funcX<TFuncId>(t, T(0.), time, xk, yk, _params);
             yk = funcY<TFuncId>(t, T(0.), time, xk, yk, _params);
@@ -309,65 +314,102 @@ void d_render_to_image(
     }
   }
 }
-/**
- *
- */
-template<unsigned TFuncId, bool TColoring, typename T>
-float launch_kernel(
-  cudaGraphicsResource* _dst,
-  Data<T>& _ddata,
-  const Parameters<T>& _params,
-  unsigned _iteration_offset)
-{
-  int numSMs;
-  int devId = 0;
-  cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, devId);
 
-//  dim3 threads( 16, 16 );
-  dim3 threads1d( 128 );
-  dim3 blocks( 64*numSMs );
+struct Launcher {
+
+  template<bool TPixelTrace, bool TSubSampling, typename T>
+  void launch(const Runner<T>& _runner,
+              T it_start, T it_end, T it_step_size) {
+
+    dim3 threads1d( 128 );
+    dim3 blocks( 64*_runner.number_sm_ );
+
+    switch(_runner.current_) {
+    case Set::POPCORN0:
+      d_generate_pattern<0, TPixelTrace, TSubSampling>
+          <<<blocks, threads1d>>>(_runner.data_, _runner.params_, it_start, it_end, it_step_size);
+      break;
+    case Set::POPCORN1:
+      d_generate_pattern<1, TPixelTrace, TSubSampling>
+          <<<blocks, threads1d>>>(_runner.data_, _runner.params_, it_start, it_end, it_step_size);
+      break;
+    case Set::POPCORN2:
+      d_generate_pattern<2, TPixelTrace, TSubSampling>
+          <<<blocks, threads1d>>>(_runner.data_, _runner.params_, it_start, it_end, it_step_size);
+      break;
+    case Set::POPCORN3:
+      d_generate_pattern<3, TPixelTrace, TSubSampling>
+          <<<blocks, threads1d>>>(_runner.data_, _runner.params_, it_start, it_end, it_step_size);
+      break;
+    }
+  }
+
+  template<typename T>
+  void operator()(const Runner<T>& _runner,
+                  T it_start, T it_end, T it_step_size) {
+
+    if(_runner.params_.pixel_trace) {
+      if(_runner.params_.sub_sampling) {
+        launch<true, true>( _runner, it_start, it_end, it_step_size);
+      }else{
+        launch<true, false>( _runner, it_start, it_end, it_step_size);
+      }
+    }else {
+      if(_runner.params_.sub_sampling) {
+        launch<false, true>( _runner, it_start, it_end, it_step_size);
+      }else{
+        launch<false, false>( _runner, it_start, it_end, it_step_size);
+      }
+    }
+  }
+
+  template<typename T>
+  void operator()(const Runner<T>& _runner, uchar4* _pos) {
+
+    dim3 threads1d( 128 );
+    dim3 blocks( 64*_runner.number_sm_ );
+
+    if(_runner.params_.pixel_trace) {
+      if(_runner.params_.hslMode)
+        d_render_to_image<true, true><<<blocks, threads1d>>>(_pos, _runner.data_, _runner.params_);
+      else
+        d_render_to_image<false, true><<<blocks, threads1d>>>(_pos, _runner.data_, _runner.params_);
+    } else {
+      if(_runner.params_.hslMode)
+        d_render_to_image<true, false><<<blocks, threads1d>>>(_pos, _runner.data_, _runner.params_);
+      else
+        d_render_to_image<false, false><<<blocks, threads1d>>>(_pos, _runner.data_, _runner.params_);
+    }
+  }
+};
+
+template<typename T>
+float Runner<T>::launch_kernel(cudaGraphicsResource* _dst, unsigned _iteration_offset) {
+
   size_t num_bytes;
   cudaError_t err;
   float ms = 0.0f;
 
+  if(_iteration_offset==0)
+    init_buffer();
+
+
   err=cudaGraphicsMapResources(1, &_dst, 0);
   if (err == cudaSuccess)  {
     uchar4* pos;
-    const T it_start = _iteration_offset/T(_params.max_iterations);
-    const T it_end = it_start + _params.iterations_per_run/T(_params.max_iterations);
-    const T it_step_size = 1.0/T(_params.max_iterations);
+    const T it_start = _iteration_offset/T(params_.max_iterations);
+    const T it_end = it_start + params_.iterations_per_run/T(params_.max_iterations);
+    const T it_step_size = 1.0/T(params_.max_iterations);
 
-    CHECK_CUDA(cudaGraphicsResourceGetMappedPointer(
-                 (void**)&pos, &num_bytes, _dst));
+    CHECK_CUDA(cudaGraphicsResourceGetMappedPointer((void**)&pos, &num_bytes, _dst));
 
     CHECK_CUDA(cudaEventRecord(custart));
 
-    if(_params.pixel_trace) {
-      if(_params.sub_sampling) {
-        d_generate_pattern<TFuncId, true, true>
-          <<<blocks, threads1d>>>(_ddata, _params, it_start, it_end, it_step_size);
-      }else{
-        d_generate_pattern<TFuncId, true, false>
-          <<<blocks, threads1d>>>(_ddata, _params, it_start, it_end, it_step_size);
-      }
-    }else {
-      if(_params.sub_sampling) {
-        d_generate_pattern<TFuncId, false, true>
-          <<<blocks, threads1d>>>(_ddata, _params, it_start, it_end, it_step_size);
-      }else{
-        d_generate_pattern<TFuncId, false, false>
-          <<<blocks, threads1d>>>(_ddata, _params, it_start, it_end, it_step_size);
-      }
-    }
+    Launcher()(*this, it_start, it_end, it_step_size);
 
     CHECK_CUDA(cudaEventRecord(cuend));
 
-    if(_params.pixel_trace) {
-      d_render_to_image<TColoring, true><<<blocks, threads1d>>>(pos, _ddata, _params);
-    } else {
-      d_render_to_image<TColoring, false><<<blocks, threads1d>>>(pos, _ddata, _params);
-    }
-
+    Launcher()(*this, pos);
 
     CHECK_CUDA( cudaEventSynchronize(cuend) );
     CHECK_CUDA( cudaEventElapsedTime(&ms, custart, cuend) );
@@ -376,72 +418,49 @@ float launch_kernel(
   return ms;
 }
 
-/**
- *
- */
+
 template<typename T>
-void alloc_buffer(
-  Data<T>& ddata,
-  const Parameters<T>& params)
+void Runner<T>::alloc_buffer()
 {
-  if(ddata.buffer) {
-    CHECK_CUDA( cudaFree(ddata.buffer) );
+  if(data_.buffer) {
+    CHECK_CUDA( cudaFree(data_.buffer) );
     CHECK_CUDA( cudaEventDestroy(custart) );
     CHECK_CUDA( cudaEventDestroy(cuend) );
   }
-  unsigned n = 5 * params.n;
-  CHECK_CUDA( cudaMalloc(&ddata.buffer, n*sizeof(T)) );
+  unsigned n = 5 * params_.n;
+  CHECK_CUDA( cudaMalloc(&data_.buffer, n*sizeof(T)) );
   CHECK_CUDA( cudaEventCreate(&custart) );
   CHECK_CUDA( cudaEventCreate(&cuend) );
 }
 
-/**
- *
- */
 template<typename T>
-void init_buffer(
-  Data<T>& ddata,
-  const Parameters<T>& params)
+void Runner<T>::init_buffer()
 {
-  //unsigned n = 5 * params.n;
-  //  CHECK_CUDA( cudaMemset(ddata.buffer, 0.0, n*sizeof(T)));
+  //unsigned n = 5 * params_.n;
+  //  CHECK_CUDA( cudaMemset(data_.buffer, 0.0, n*sizeof(T)));
   int numSMs;
   int devId = 0;
   cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, devId);
 
   dim3 threads( 16, 16 );
   dim3 blocks( 32*numSMs );
-  d_init_buffer<<<blocks, threads>>>(ddata, params);
+  d_init_buffer<<<blocks, threads>>>(data_, params_);
   CHECK_CUDA( cudaDeviceSetCacheConfig(cudaFuncCachePreferL1) );
 }
 
-/**
- *
- */
 template<typename T>
-void cleanup_cuda(Data<T>& ddata)
+void Runner<T>::cleanup_cuda()
 {
-  if(ddata.buffer) {
-    CHECK_CUDA( cudaFree(ddata.buffer) );
-    ddata.buffer = 0;
+  if(data_.buffer) {
+    CHECK_CUDA( cudaFree(data_.buffer) );
+    data_.buffer = 0;
   }
 }
 
-
-template
-void alloc_buffer<float>(Data<float>&, const Parameters<float>&);
-template
-void init_buffer<float>(Data<float>&, const Parameters<float>&);
-template float launch_kernel<0, false, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&, unsigned);
-template float launch_kernel<1, false, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&, unsigned);
-template float launch_kernel<2, false, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&, unsigned);
-template float launch_kernel<3, false, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&, unsigned);
-template float launch_kernel<0, true, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&, unsigned);
-template float launch_kernel<1, true, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&, unsigned);
-template float launch_kernel<2, true, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&, unsigned);
-template float launch_kernel<3, true, float>(cudaGraphicsResource*, Data<float>&, const Parameters<float>&, unsigned);
-template
-void cleanup_cuda<float>(Data<float>&);
+    template
+    struct Runner<float>;
+  }
+}
 
 /*
 template

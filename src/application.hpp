@@ -1,17 +1,11 @@
-/*
- * application.h
- *
- *  Created on: 17.09.2016
- *      Author: mwerner
- */
-
 #ifndef APPLICATION_H_
 #define APPLICATION_H_
 
 #include "gl_globals.hpp"
-#include "cuda_globals.hpp" // ... also simulation settings
+#include "cuda_globals.hpp"
 #include "shader.hpp"
 #include "image.hpp"
+#include "fractal.hpp"
 
 #include <mutex>
 #include <array>
@@ -30,8 +24,24 @@ enum class Resolution {
   SD,
   HD,
   HD2,
-  HDD2
+  HDD2,
+  _COUNT
 };
+
+
+/// User Setting
+struct UserSetting
+{
+  bool vsync = false;
+  bool animation=false;
+  double timeScale = 0.15;
+
+  std::string outputDir="output";
+  std::string prefix="img_";
+
+  Resolution resolution = Resolution::_COUNT; // initialize with change_resolution
+};
+
 
 template<typename T>
 class Application : public nanogui::Screen
@@ -47,13 +57,19 @@ public:
 
 private:
   void create_quad();
-  void initCuda();
+  void init_cuda();
   void cleanup();
   void create_shader();
-  void create_buffers();
-  void runCuda();
-  void computeFPS();
+  void create_gl_buffers();
+  void run_cuda();
+  void compute_fps();
   void recompute();
+
+  void reset_gui();
+  void gui_popcorn();
+  void gui_mccabe();
+  void gui_main();
+  void change_resolution(Resolution state);
 
   template<typename U, typename V>
   void update_value(U& target, V source) {
@@ -72,6 +88,10 @@ private:
   virtual bool resizeEvent(const Eigen::Vector2i &) override;
 
 private:
+  Fractal::Fractals<T> fractals_;
+  Fractal::Set fractal_later_;
+  UserSetting settings_;
+
   GLuint quadFinalVBOId_ = 0, quadIBOId_ = 0, vertexArrayQuad_ = 0;
   GLuint texId_ = 0;
   GLuint imagePBO_ = 0;
@@ -84,25 +104,19 @@ private:
   bool screenshot_ = false;
   bool recompute_ = false;
   bool mousePressed_ = false;
-  unsigned tmp_texWidth_;
-  unsigned tmp_texHeight_;
-  //    std::mutex mutex_max_iterations_;
+  unsigned texture_width_ = 0;
+  unsigned texture_height_ = 0;
+  unsigned texture_width_later_ = 0;
+  unsigned texture_height_later_ = 0;
 
-  Parameters<T> parameters_;
-  Data<T> ddata_;
-  DataMc<T> ddata_mc_;
-  UserSetting settings_;
   double fps_ = 0.0;
   float ms_kernel_ = 0.0f;
-  Resolution resolution_;
-  unsigned iterations_offset_;
+  unsigned iteration_offset_ = 0;
 
-  nanogui::ref<nanogui::Window> window_;
-  nanogui::ref<nanogui::Window> window_status_;
-  nanogui::ref<nanogui::Window> window_shading_;
+  nanogui::ref<nanogui::Window> window_ = nullptr;
+  nanogui::ref<nanogui::Window> window_params_ = nullptr;
+  nanogui::ref<nanogui::Window> window_shading_ = nullptr;
   nanogui::Button* btnAnimate_ = nullptr;
-  nanogui::Label* labelStatus_ = nullptr;
-  nanogui::Label* labelPosition_ = nullptr;
   std::array<nanogui::FloatBox<double>*, 4> gui_coef_ = {{nullptr}};
   std::array<nanogui::FloatBox<double>*, 4> gui_zoom_ = {{nullptr}};
   nanogui::FloatBox<double>* gui_talpha_ = nullptr;
