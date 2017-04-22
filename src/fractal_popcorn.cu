@@ -204,7 +204,8 @@ void d_generate_pattern(
       yk = yk0;
 
       if( TPixelTrace ) {
-        if( ((i%_params.width)&3)==0 && ((i/_params.width)&3)==0 ) {
+        if( ((i%_params.width)&_params.pixel_trace_divisor)==0
+            && ((i/_params.width)&_params.pixel_trace_divisor)==0 ) {
 
           T time = sinf(_params.time) * _params.density_slope;
           for(t=_iteration_start; t<_iteration_end; t+=_iteration_step_size) {

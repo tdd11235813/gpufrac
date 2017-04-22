@@ -39,6 +39,7 @@ namespace Fractal {
       bool sub_sampling = false;
       bool pixel_trace = false;
       bool hslMode=false;
+      unsigned pixel_trace_divisor=3;
       T hue_start = 0.0;
       T hue_end   = 0.3;
       T hue_slope = 1.45;

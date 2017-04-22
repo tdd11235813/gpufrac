@@ -117,13 +117,15 @@ private:
   nanogui::ref<nanogui::Window> window_params_ = nullptr;
   nanogui::ref<nanogui::Window> window_shading_ = nullptr;
   nanogui::Button* btnAnimate_ = nullptr;
-  std::array<nanogui::FloatBox<double>*, 4> gui_coef_ = {{nullptr}};
-  std::array<nanogui::FloatBox<double>*, 4> gui_zoom_ = {{nullptr}};
-  nanogui::FloatBox<double>* gui_talpha_ = nullptr;
-  nanogui::FloatBox<double>* gui_add_ = nullptr;
+  nanogui::FloatBox<T>* gui_x0_ = nullptr;
+  nanogui::FloatBox<T>* gui_x1_ = nullptr;
+  nanogui::FloatBox<T>* gui_y0_ = nullptr;
+  nanogui::FloatBox<T>* gui_y1_ = nullptr;
   nanogui::IntBox<unsigned>* gui_texWidth_ = nullptr;
   nanogui::IntBox<unsigned>* gui_texHeight_ = nullptr;
   nanogui::Slider* gui_iterations_ = nullptr;
+  nanogui::Label* labelTime_ = nullptr;
+  nanogui::Label* labelStatus_ = nullptr;
 };
 
 

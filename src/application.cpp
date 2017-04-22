@@ -39,35 +39,30 @@ Application<T>::Application()
 
   resizeEvent(Eigen::Vector2i(0,0)); // initial window positions
 
-  // // FPS thread
-  // std::thread([&]()
-  //             {
-  //               while (1)
-  //               {
-  //                 std::ostringstream ss;
-  //                 ss << "Time: " << std::fixed << std::setprecision(3) << parameters_.time
-  //                    << std::setprecision(1) << "    [" << fps_ << " FPS]";
-  //                 window_status_->setTitle( ss.str() );
-  //                 ss.str("");
-  //                 ss.clear();
-  //                 ss << "(x0, x1): " << std::fixed << std::setprecision(2)
-  //                    << parameters_.x0 << ", " << parameters_.x1
-  //                    << "    (y0, y1): "
-  //                    << parameters_.y0 << ", " << parameters_.y1;
-  //                 labelPosition_->setCaption(ss.str());
-  //                 if(settings_.animation) {
-  //                   ss.str("");
-  //                   ss.clear();
-  //                   ss << "Kernel: " << std::fixed << std::setprecision(1) << ms_kernel_ <<" ms";
-  //                   labelStatus_->setCaption(ss.str());
-  //                 }
-  //                 std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-  //                 if(app_started_==false) {
-  //                   recompute();
-  //                   app_started_ = true;
-  //                 }
-  //               }
-  //             }).detach();
+  // FPS thread
+  std::thread([&]()
+              {
+                while (1)
+                {
+                  std::ostringstream ss;
+                  ss << std::setprecision(1) << std::fixed << fps_;
+                  if(fractals_.current_ == Fractal::Set::POPCORN)
+                    ss << " (t=" << std::fixed << std::setprecision(3)
+                       << fractals_.popcorn_.params_.time << ")";
+                  labelTime_->setCaption( ss.str() );
+                  if(settings_.animation) {
+                    ss.str("");
+                    ss.clear();
+                    ss << "Kernel = " << std::fixed << std::setprecision(1) << ms_kernel_ <<" ms";
+                    labelStatus_->setCaption(ss.str());
+                  }
+                  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                  if(app_started_==false) {
+                    recompute();
+                    app_started_ = true;
+                  }
+                }
+              }).detach();
 
   std::cout << "> Initialization done." << std::endl;
 }
@@ -172,7 +167,7 @@ void Application<T>::draw(NVGcontext* ctx)
                                  texture_height_,
                                  settings_.outputDir,
                                  settings_.prefix);
-      //labelStatus_->setCaption(std::string("Saved to: ") + s);
+      labelStatus_->setCaption(std::string("Saved to: ") + s);
     }catch(const std::runtime_error& e){
       using namespace nanogui;
       new MessageDialog(
@@ -210,9 +205,9 @@ void Application<T>::draw(NVGcontext* ctx)
         iteration_offset_ += fractals_.popcorn_.params_.iterations_per_run;
         if( iteration_offset_ >= fractals_.popcorn_.params_.iterations) {
           iteration_offset_ = 0;
-          //labelStatus_->setCaption("Finished!");
-        }//else
-          //labelStatus_->setCaption("Rendering ...");
+          labelStatus_->setCaption("Finished!");
+        }else
+          labelStatus_->setCaption("Rendering ...");
       }
       recompute_ = false;
     }
@@ -299,7 +294,7 @@ bool Application<T>::keyboardEvent(int key, int scancode, int action, int modifi
   {
     settings_.animation = !settings_.animation;
     btnAnimate_->setPushed(settings_.animation);
-    //labelStatus_->setCaption("");
+    labelStatus_->setCaption("");
     if(settings_.animation==false)
       recompute();
     return true;
@@ -308,7 +303,6 @@ bool Application<T>::keyboardEvent(int key, int scancode, int action, int modifi
   if (key == GLFW_KEY_M && action == GLFW_PRESS)
   {
     window_->setVisible(!window_->visible());
-//    window_status_->setVisible(!window_status_->visible());
     window_shading_->setVisible(!window_shading_->visible());
     window_params_->setVisible(!window_params_->visible());
     return true;
@@ -452,6 +446,10 @@ bool Application<T>::mouseMotionEvent(const Eigen::Vector2i& p,
     params.x1 -= dx;
     params.y0 -= dy;
     params.y1 -= dy;
+    gui_x0_->setValue(params.x0);
+    gui_x1_->setValue(params.x1);
+    gui_y0_->setValue(params.y0);
+    gui_y1_->setValue(params.y1);
     recompute();
     return true;
   }
@@ -465,7 +463,6 @@ bool Application<T>::mouseButtonEvent(const Eigen::Vector2i& p, int button, bool
   Screen::mouseButtonEvent(p, button, down, modifiers);
   if(down && button == GLFW_MOUSE_BUTTON_LEFT
      && (window_->visible()==false || window_->contains(p)==false)
-//     && (window_status_->visible()==false || window_status_->contains(p)==false)
      && (window_shading_->visible()==false || window_shading_->contains(p)==false)
      && (window_params_->visible()==false || window_params_->contains(p)==false)
     ){
@@ -485,7 +482,6 @@ bool Application<T>::scrollEvent(const Eigen::Vector2i& p,
   Screen::scrollEvent(p, rel);
   if(fractals_.current_ != Fractal::Set::MCCABE
      && (window_->visible()==false || window_->contains(p)==false)
-     //    && (window_status_->visible()==false || window_status_->contains(p)==false)
      && (window_shading_->visible()==false || window_shading_->contains(p)==false)
      && (window_params_->visible()==false || window_params_->contains(p)==false)
     ) {
@@ -499,6 +495,11 @@ bool Application<T>::scrollEvent(const Eigen::Vector2i& p,
     params.x1 += (1.0-vx)*zfactor_x;
     params.y0 -= vy*zfactor_y;
     params.y1 += (1.0-vy)*zfactor_y;
+
+    gui_x0_->setValue(params.x0);
+    gui_x1_->setValue(params.x1);
+    gui_y0_->setValue(params.y0);
+    gui_y1_->setValue(params.y1);
     recompute();
     return true;
   }
@@ -510,11 +511,10 @@ inline bool
 Application<T>::resizeEvent(const Eigen::Vector2i& )
 {
   window_->setPosition(Eigen::Vector2i(0, height()-window_->height()+(height()>500?-100:0)));
-//  window_status_->setPosition(Eigen::Vector2i(width()-window_status_->width(), height()-window_status_->height()));
   window_params_->setPosition(Eigen::Vector2i((width()-window_params_->width())/3, height()-window_params_->height()));
   window_shading_->setPosition(Eigen::Vector2i((width()+window_shading_->width())/2, height()-window_shading_->height()));
-//  labelPosition_->setWidth(260);
-//  labelStatus_->setWidth(260);
+  labelTime_->setWidth(260);
+  labelStatus_->setWidth(260);
   return true;
 }
 
@@ -561,6 +561,24 @@ void Application<T>::gui_popcorn() {
   box->setSpinnable(true);
   box->setMinMaxValues(1, 128);
 
+  std::array<std::string, 4> xylabels = {{"x0", "x1", "y0", "y1"}};
+  gui_x0_ = gui->addVariable(xylabels[0], params.x0);
+  gui_x0_->setValueIncrement(0.05);
+  gui_x0_->setSpinnable(true);
+  gui_x0_->setCallback([&](auto v){ this->update_value(params.x0, v); });
+  gui_x1_ = gui->addVariable(xylabels[1], params.x1);
+  gui_x1_->setValueIncrement(0.05);
+  gui_x1_->setSpinnable(true);
+  gui_x1_->setCallback([&](auto v){ this->update_value(params.x1, v); });
+  gui_y0_ = gui->addVariable(xylabels[2], params.y0);
+  gui_y0_->setValueIncrement(0.05);
+  gui_y0_->setSpinnable(true);
+  gui_y0_->setCallback([&](auto v){ this->update_value(params.y0, v); });
+  gui_y1_ = gui->addVariable(xylabels[3], params.y1);
+  gui_y1_->setValueIncrement(0.05);
+  gui_y1_->setSpinnable(true);
+  gui_y1_->setCallback([&](auto v){this->update_value(params.y1, v);});
+
   std::array<std::string, 4> cflabels = {{"c0", "c1", "c2", "c3"}};
   auto* coeffbox = gui->addVariable(cflabels[0], params.t0);
   coeffbox->setValueIncrement(0.05);
@@ -593,7 +611,7 @@ void Application<T>::gui_popcorn() {
   // -- Coloring --
   if(window_shading_)
     window_shading_->dispose();
-  window_shading_ = gui->addWindow(Eigen::Vector2i(10, 10), "Shading");
+  window_shading_ = gui->addWindow(Eigen::Vector2i(10, 10), "Rendering");
   window_shading_->setWidth(220);
   gui->addGroup("Colors");
   auto* cbox = gui->addVariable("HSL Mode", params.hslMode);
@@ -603,7 +621,14 @@ void Application<T>::gui_popcorn() {
   cbox->setCallback([&](auto v){this->update_value(params.sub_sampling, v);} );
 
   cbox = gui->addVariable("PixelTrace", params.pixel_trace);
-  cbox->setCallback([&](auto v){this->update_value(params.pixel_trace, v);} );
+
+  IntBox<unsigned>* ibox = gui->addVariable("Divisor", params.pixel_trace_divisor);
+  ibox->setCallback([&](auto v){this->update_value(params.pixel_trace_divisor, v);} );
+  ibox->setEnabled(false);
+  ibox->setSpinnable(true);
+  ibox->setMinValue(0);
+
+  cbox->setCallback([&,ibox](auto v){this->update_value(params.pixel_trace, v); ibox->setEnabled(v);} );
 
   // Slider *slider = new Slider(gui->window());
   // slider->setValue(0.0f);
@@ -704,7 +729,7 @@ void Application<T>::gui_mccabe() {
   // -- Coloring --
   if(window_shading_)
     window_shading_->dispose();
-  window_shading_ = gui->addWindow(Eigen::Vector2i(10, 10), "Shading");
+  window_shading_ = gui->addWindow(Eigen::Vector2i(10, 10), "Rendering");
   window_shading_->setWidth(220);
   gui->addGroup("Colors");
 
@@ -784,21 +809,9 @@ void Application<T>::gui_main() {
 
   // -- Image --
   gui->addGroup("Image");
-  gui_texWidth_ = gui->addVariable("texWidth", texture_width_later_);
-  // gui_texWidth_->setCallback([&](auto v){
-  //   if(texture_width_!=v) {
-  //     texture_width_later_ = v;
-  //     rescale_ = true;
-  //   }
-  // } );
+  gui_texWidth_ = gui->addVariable("Width", texture_width_later_);
   gui_texWidth_->setMinMaxValues(32, 4096);
-  gui_texHeight_ = gui->addVariable("texHeight", texture_height_later_);
-  // gui_texHeight_->setCallback([&](auto v){
-  //   if(texture_height_!=v) {
-  //     texture_height_later_ = v;
-  //     rescale_ = true;
-  //   }
-  // } );
+  gui_texHeight_ = gui->addVariable("Height", texture_height_later_);
   gui_texHeight_->setMinMaxValues(32, 4096);
 
   auto* cobores = gui->addVariable("Resolution", settings_.resolution);
@@ -817,8 +830,17 @@ void Application<T>::gui_main() {
     settings_.animation=state;
     if(state==false)
       this->recompute();
-//    labelStatus_->setCaption("");
+    labelStatus_->setCaption("");
   });
+
+  labelTime_ = new Label(window_, "");
+  labelTime_->setColor(nanogui::Color(150,255));
+
+  labelStatus_ = new Label(window_, "");
+  labelStatus_->setColor(nanogui::Color(30,205,30,255));
+
+  gui->addWidget("FPS: ", labelTime_);
+  gui->addWidget("Status: ", labelStatus_);
 }
 
 template<typename T>
