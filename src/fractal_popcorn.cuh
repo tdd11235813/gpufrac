@@ -34,11 +34,6 @@ namespace Fractal {
       unsigned max_iterations=64;
       unsigned iterations=64;
       unsigned iterations_per_run=32;
-      bool use_atomics = true;
-      bool invert = false;
-      bool sub_sampling = false;
-      bool pixel_trace = false;
-      bool hslMode=false;
       unsigned pixel_trace_divisor=3;
       T hue_start = 0.0;
       T hue_end   = 0.3;
@@ -46,13 +41,23 @@ namespace Fractal {
       T density_slope = 1.0;
       T brightness_slope = 1.0;
       T saturation_slope = 1.0;
+      float border_width = 0.0f;
+      bool use_atomics = true;
+      bool invert = false;
     };
 
     enum class Set {
       POPCORN0=0,
       POPCORN1,
       POPCORN2,
-      POPCORN3
+      POPCORN3,
+      POPCORN4
+    };
+
+    enum class Renderer {
+      DEFAULT=0,
+      HSL,
+      QUILEZ
     };
 
     template<typename T>
@@ -60,13 +65,15 @@ namespace Fractal {
       Data<T> data_;
       Parameters<T> params_;
       Set current_ = Set::POPCORN0;
+      Renderer renderer_ = Renderer::DEFAULT;
+      bool pixel_trace_ = false;
+      bool sub_sampling_ = false;
       int number_sm_ = 0;
       int dev_id_ = 0;
 
       Runner() {
         cudaDeviceGetAttribute(&number_sm_, cudaDevAttrMultiProcessorCount, dev_id_);
       }
-
 
       float launch_kernel(cudaGraphicsResource* dst, unsigned);
 

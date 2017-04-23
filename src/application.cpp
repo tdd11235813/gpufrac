@@ -206,10 +206,11 @@ void Application<T>::draw(NVGcontext* ctx)
         if( iteration_offset_ >= fractals_.popcorn_.params_.iterations) {
           iteration_offset_ = 0;
           labelStatus_->setCaption("Finished!");
+          recompute_ = false;
         }else
           labelStatus_->setCaption("Rendering ...");
-      }
-      recompute_ = false;
+      }else
+        recompute_ = false;
     }
   }
   oldtime = current_time;
@@ -534,13 +535,8 @@ void Application<T>::gui_popcorn() {
   gui->addGroup("Parameters");
 
   auto* cobo = gui->addVariable("Popcorns", fractals_.popcorn_.current_);
-  cobo->setItems({"V1", "V2", "Classic", "Test"});
-  cobo->setCallback([&](auto state) {
-    if(state != fractals_.popcorn_.current_) {
-      fractals_.popcorn_.current_ = state;
-      this->recompute();
-    }
-  });
+  cobo->setItems({"V1", "V2", "Classic", "V3", "Test"});
+  cobo->setCallback([&](auto state) {this->update_value(fractals_.popcorn_.current_, state);});
 
 
   IntBox<unsigned>* box = gui->addVariable("MaxIterations", params.max_iterations);
@@ -581,30 +577,30 @@ void Application<T>::gui_popcorn() {
 
   std::array<std::string, 4> cflabels = {{"c0", "c1", "c2", "c3"}};
   auto* coeffbox = gui->addVariable(cflabels[0], params.t0);
-  coeffbox->setValueIncrement(0.05);
+  coeffbox->setValueIncrement(0.01);
   coeffbox->setSpinnable(true);
   coeffbox->setCallback([&](auto v){ this->update_value(params.t0, v); });
   coeffbox = gui->addVariable(cflabels[1], params.t1);
-  coeffbox->setValueIncrement(0.05);
+  coeffbox->setValueIncrement(0.01);
   coeffbox->setSpinnable(true);
   coeffbox->setCallback([&](auto v){ this->update_value(params.t1, v); });
   coeffbox = gui->addVariable(cflabels[2], params.t2);
-  coeffbox->setValueIncrement(0.05);
+  coeffbox->setValueIncrement(0.01);
   coeffbox->setSpinnable(true);
   coeffbox->setCallback([&](auto v){ this->update_value(params.t2, v); });
   coeffbox = gui->addVariable(cflabels[3], params.t3);
-  coeffbox->setValueIncrement(0.05);
+  coeffbox->setValueIncrement(0.01);
   coeffbox->setSpinnable(true);
   coeffbox->setCallback([&](auto v){this->update_value(params.t3, v);});
 
   coeffbox = gui->addVariable("Lambda", params.talpha);
-  coeffbox->setValueIncrement(0.005);
+  coeffbox->setValueIncrement(0.001);
   coeffbox->setSpinnable(true);
   coeffbox->setCallback([&](auto v){this->update_value(params.talpha, v);});
 
   coeffbox = gui->addVariable("Hit value", params.hit_value);
   coeffbox->setValueIncrement(0.001);
-  coeffbox->setMinValue(0.001);
+  coeffbox->setMinValue(0.0001);
   coeffbox->setSpinnable(true);
   coeffbox->setCallback([&](auto v){this->update_value(params.hit_value, v);});
 
@@ -613,14 +609,17 @@ void Application<T>::gui_popcorn() {
     window_shading_->dispose();
   window_shading_ = gui->addWindow(Eigen::Vector2i(10, 10), "Rendering");
   window_shading_->setWidth(220);
-  gui->addGroup("Colors");
-  auto* cbox = gui->addVariable("HSL Mode", params.hslMode);
-  cbox->setCallback([&](auto v){this->update_value(params.hslMode, v);} );
 
-  cbox = gui->addVariable("SubSampling", params.sub_sampling);
-  cbox->setCallback([&](auto v){this->update_value(params.sub_sampling, v);} );
+  gui->addGroup("Renderer");
+  auto* cobo_renderer = gui->addVariable("Renderer", fractals_.popcorn_.renderer_);
+  cobo_renderer->setItems({"Default", "HSL", "Quilez"});
+  cobo_renderer->setCallback([&](auto v){this->update_value(fractals_.popcorn_.renderer_, v);} );
 
-  cbox = gui->addVariable("PixelTrace", params.pixel_trace);
+
+  auto* cbox2 = gui->addVariable("SubSampling", fractals_.popcorn_.sub_sampling_);
+  cbox2->setCallback([&](auto v){this->update_value(fractals_.popcorn_.sub_sampling_, v);} );
+
+  auto* cbox = gui->addVariable("PixelTrace", fractals_.popcorn_.pixel_trace_);
 
   IntBox<unsigned>* ibox = gui->addVariable("Divisor", params.pixel_trace_divisor);
   ibox->setCallback([&](auto v){this->update_value(params.pixel_trace_divisor, v);} );
@@ -628,24 +627,31 @@ void Application<T>::gui_popcorn() {
   ibox->setSpinnable(true);
   ibox->setMinValue(0);
 
-  cbox->setCallback([&,ibox](auto v){this->update_value(params.pixel_trace, v); ibox->setEnabled(v);} );
+  cbox->setCallback([&,ibox,cbox2](auto v){
+    this->update_value(fractals_.popcorn_.pixel_trace_, v);
+    ibox->setEnabled(v);
+    cbox2->setEnabled(!v);
+  } );
 
-  // Slider *slider = new Slider(gui->window());
-  // slider->setValue(0.0f);
-  // slider->setFixedWidth(80);
-  // slider->setFinalCallback([&](float v){this->update_value(params.hue_start, v); });
-  // gui->addWidget("Hue", slider);
+  auto* vbox = gui->addVariable("Border", params.border_width);
+  vbox->setCallback([&](auto v){this->update_value(params.border_width, v); });
+  vbox->setSpinnable(true);
+  vbox->setMinMaxValues(0.0, 1.0);
+  vbox->setValueIncrement(0.05);
 
-  auto* vbox = gui->addVariable("HueStart", params.hue_start);
+
+  gui->addGroup("Coloring");
+
+  vbox = gui->addVariable("HueStart", params.hue_start);
   vbox->setCallback([&](auto v){this->update_value(params.hue_start, v); });
   vbox->setSpinnable(true);
-  vbox->setMinMaxValues(-1.0, 1.0);
+  vbox->setMinMaxValues(-10.0, 10.0);
   vbox->setValueIncrement(0.01);
 
   vbox = gui->addVariable("HueEnd", params.hue_end);
   vbox->setCallback([&](auto v){this->update_value(params.hue_end, v); });
   vbox->setSpinnable(true);
-  vbox->setMinMaxValues(-1.0, 1.0);
+  vbox->setMinMaxValues(-10.0, 10.0);
   vbox->setValueIncrement(0.01);
 
   vbox = gui->addVariable("HueSlope", params.hue_slope);

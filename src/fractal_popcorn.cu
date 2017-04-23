@@ -128,11 +128,10 @@ inline __device__
 T funcX(T t, T time, T talpha, T xk, T yk, const Parameters<T>& params) {
   switch(TFuncId) {
   case 0: return xk+talpha*cosf(params.t0+time+yk+cosf(params.t1+time+PI*xk));
-  case 1: return t*yk+0.95f*xk-talpha*sinf(0.7f*yk);//+sin(3.0f*0.7f*yk));
-    // xk-hf(y+hf(x)), f(x)=sin(x+sin(3x))
-//  case 2: return xk-talpha*sin( yk+talpha*sin(params.t0+time+xk+sin(params.t1+time+3.0*xk)) + sin(3.0*(yk+talpha*sin(params.t0+time+xk+sin(params.t1+time+3.0*xk)))) );
+  case 1: return t*yk+0.95f*xk-talpha*sinf(0.7f*yk);
   case 2: return xk - talpha*sinf( params.t1*yk + tanf(params.t0*yk) + time);
-  case 3: return xk-talpha*sinf( params.t0+yk+time+sinf(3*yk+params.t1+time+sinf(2*yk+time)) );
+  case 3: return xk-talpha*sinf( params.t0+yk*time+tanf(3*yk+params.t1+time+sinf(2*yk+time)) );
+  case 4: return xk+talpha*cosf( params.t0+yk*time+cosf(params.t1/(xk+1.0f)+time) );
   }
   return xk;
 }
@@ -141,23 +140,24 @@ template<unsigned TFuncId, typename T>
 inline __device__
 T funcY(T t, T time, T talpha, T xk, T yk, const Parameters<T>& params) {
   switch(TFuncId) {
-  case 0: return yk+talpha*cos( params.t2+time+xk+cos(params.t3+time+PI*yk));
-  case 1: return t*xk+0.95f*yk+talpha*sin(0.6f*xk);//+sin(3.0f*0.6f*xk));
-//  case 2: return yk+talpha*sin(params.t2+time+xk+sin(params.t3+time+3.0*xk));
-  case 2: return yk - talpha*sin( params.t3*xk + tan(params.t2*xk) + time);
-  case 3: return yk+talpha*sin( xk+params.t2+time+sin(3*xk+params.t3+time+sin(2*xk+time)) );
+  case 0: return yk+talpha*cosf( params.t2+time+xk+cosf(params.t3+time+PI*yk));
+  case 1: return t*xk+0.95f*yk+talpha*sinf(0.6f*xk);
+  case 2: return yk - talpha*sinf( params.t3*xk + tanf(params.t2*xk) + time);
+  case 3: return yk+talpha*sinf( params.t2+xk*time+tanf(3*xk+params.t3+time+sinf(2*xk+time)) );
+  case 4: return yk+talpha*cosf( params.t2+xk*time+cosf(params.t3/(yk+1.0f)+time) );
   }
   return yk;
 }
 
-template<unsigned TFuncId, bool TPixelTrace, bool TSubSamples, typename T>
+template<unsigned TFuncId, bool TPixelTrace, bool TSubSampling, typename T>
 __global__
 void d_generate_pattern(
   Data<T> _data,
   const Parameters<T> _params,
   const T _iteration_start,
   const T _iteration_end,
-  const T _iteration_step_size
+  const T _iteration_step_size,
+  int _stage
   )
 {
   unsigned i;
@@ -166,15 +166,23 @@ void d_generate_pattern(
   T width = _params.width;
   T height = _params.height;
   T t;
+  T* density;
+  density = _stage==-1 ? _data.buffer : _data.buffer+_stage*_params.n;
 
   for (i = blockIdx.x * blockDim.x + threadIdx.x;
        i < _params.n;
        i += blockDim.x * gridDim.x)
   {
+    auto ix = (i%_params.width);
+    auto iy = (i/_params.width);
+    if(ix<0.5f*_params.border_width*_params.width || ix>(1.f-0.5f*_params.border_width)*_params.width
+       || iy<0.5f*_params.border_width*_params.height || iy>(1.f-0.5f*_params.border_width)*_params.height)
+      continue;
+
     xk0 = _data.buffer[i + 3*_params.n]; // already mapped into world space
     yk0 = _data.buffer[i + 4*_params.n];
 
-    if(TSubSamples) {
+    if(TSubSampling) {
 
       for(int dx=-1; dx<=1; ++dx) {
         for(int dy=-1; dy<=1; ++dy) {
@@ -192,9 +200,9 @@ void d_generate_pattern(
               if(dx!=0||dy!=0)
                 v *= 0.5;
               if(_params.use_atomics)
-                atomicAdd(_data.buffer+offset, v); // just density
+                atomicAdd(density+offset, v); // just density
               else
-                _data.buffer[offset] += v;
+                density[offset] += v;
             }
           } // for
         }
@@ -219,15 +227,14 @@ void d_generate_pattern(
 //                T v = 0.5*(T(t)/_params.iterations)+0.33;
               T v = 0.5*(T(t)/_iteration_end)+0.25;
               if(_params.use_atomics)
-                atomicExch(_data.buffer+offset, v);
+                atomicExch(density+offset, v);
               else
-                _data.buffer[offset] = v;
+                density[offset] = v;
             }
           }
         }
       }
       else {
-
         for(t=_iteration_start; t<_iteration_end; t+=_iteration_step_size) {
           xk = funcX<TFuncId>(t, _params.time, _params.talpha, xk, yk, _params);
           yk = funcY<TFuncId>(t, _params.time, _params.talpha, xk, yk, _params);
@@ -238,20 +245,22 @@ void d_generate_pattern(
             unsigned offset = px+py*_params.width;
             T v = _params.hit_value*powf(1.0f-t, _params.density_slope);
             if(_params.use_atomics)
-              atomicAdd(_data.buffer+offset, v); // just density
+              atomicAdd(density+offset, v); // just density
             else
-              _data.buffer[offset] += v;
+              density[offset] += v;
           }
         } // for
       } // TPixelTrace
-    } // TSubSamples
-
-    _data.buffer[i + 3*_params.n] = xk;
-    _data.buffer[i + 4*_params.n] = yk;
+    } // TSubSampling
+    // only store current world position if in no-stage mode or in last stage
+    if(_stage==-1 || _stage==2) {
+      _data.buffer[i + 3*_params.n] = xk;
+      _data.buffer[i + 4*_params.n] = yk;
+    }
   }
 }
 
-template<bool TColoring, bool TPixelTrace, typename T>
+template<Renderer TRenderer, bool TPixelTrace, typename T>
 __global__
 void d_render_to_image(
   uchar4 *_ptr,
@@ -264,46 +273,60 @@ void d_render_to_image(
        j < _params.n;
        j += blockDim.x * gridDim.x)
   {
-    if(TColoring) {
+    switch(TRenderer) {
+    case Renderer::HSL:
 
-      T v = _data.buffer[j];
       float h;
       float s;
       float l;
-      if(_params.hue_end>=_params.hue_start)
-        h = powf((_params.hue_end-_params.hue_start)*__saturatef(v), _params.hue_slope) + _params.hue_start;
-      else
-        h = powf((_params.hue_start-_params.hue_end)*(__saturatef(v)), _params.hue_slope) + _params.hue_end;
-      if(h<0.0f)
-        h += 1.0f;
-      else if(h>1.0f)
-        h -= 1.0f;
-      s = __saturatef(powf(v, _params.saturation_slope));
-      l = __saturatef(powf(v, _params.brightness_slope));
-      if(_params.invert)
-        l = 1.0f-l;
-      hsl2rgb(h, s, l, _ptr[j]);
-    } else if(TPixelTrace) {
 
-      T v = 100*_params.hit_value*_data.buffer[j];
-      float h;
-      float s;
-      float l;
-      if(_params.hue_end>=_params.hue_start)
-        h = powf((_params.hue_end-_params.hue_start)*v, _params.hue_slope) + _params.hue_start;
-      else
-        h = powf((_params.hue_start-_params.hue_end)*v, _params.hue_slope) + _params.hue_end;
-      if(h<0.0f)
-        h += 1.0f;
-      else if(h>1.0f)
-        h -= 1.0f;
-      s = __saturatef(_params.saturation_slope);
-      l = __saturatef(v*_params.brightness_slope);
-      if(_params.invert)
-        l = 1.0f-l;
-      hsl2rgb(h, s, l, _ptr[j]);
-    } else {
+      if(TPixelTrace) {
+        T v = 100*_params.hit_value*_data.buffer[j];
+        if(_params.hue_end>=_params.hue_start)
+          h = powf((_params.hue_end-_params.hue_start)*v, _params.hue_slope) + _params.hue_start;
+        else
+          h = powf((_params.hue_start-_params.hue_end)*v, _params.hue_slope) + _params.hue_end;
+        if(h<0.0f)
+          h += 1.0f;
+        else if(h>1.0f)
+          h -= 1.0f;
+        s = __saturatef(_params.saturation_slope);
+        l = __saturatef(v*_params.brightness_slope);
+        if(_params.invert)
+          l = 1.0f-l;
+        hsl2rgb(h, s, l, _ptr[j]);
 
+      } else {
+        T v = _data.buffer[j];
+        if(_params.hue_end>=_params.hue_start)
+          h = powf((_params.hue_end-_params.hue_start)*__saturatef(v), _params.hue_slope) + _params.hue_start;
+        else
+          h = powf((_params.hue_start-_params.hue_end)*(__saturatef(v)), _params.hue_slope) + _params.hue_end;
+        if(h<0.0f)
+          h += 1.0f;
+        else if(h>1.0f)
+          h -= 1.0f;
+        s = __saturatef(powf(v, _params.saturation_slope));
+        l = __saturatef(powf(v, _params.brightness_slope));
+        if(_params.invert)
+          l = 1.0f-l;
+        hsl2rgb(h, s, l, _ptr[j]);
+      }
+
+      break;
+    case Renderer::QUILEZ:
+
+      if(_params.invert) {
+        _ptr[j].x = toColor( powf(powf(sqrtf(_data.buffer[j]), _params.hue_slope), _params.brightness_slope) );
+        _ptr[j].y = toColor( powf(sqrtf(_data.buffer[j+_params.n]), _params.brightness_slope) );
+        _ptr[j].z = toColor( powf(sqrtf(_data.buffer[j+2*_params.n]), _params.brightness_slope) );
+      } else {
+        _ptr[j].x = toColor( 1.-powf(powf(sqrtf(_data.buffer[j]), _params.hue_slope), _params.brightness_slope) );
+        _ptr[j].y = toColor( 1.-powf(sqrtf(_data.buffer[j+_params.n]), _params.brightness_slope) );
+        _ptr[j].z = toColor( 1.-powf(sqrtf(_data.buffer[j+2*_params.n]), _params.brightness_slope) );
+      }
+      break;
+    default:
       T density = sqrt(_data.buffer[j]);//exp(-data.buffer[j])
       _ptr[j].x = toColor( 1.0-0.3*powf(density,0.4) );
       _ptr[j].y = toColor( 1.0-0.5*powf(density,1.0) );
@@ -320,7 +343,9 @@ struct Launcher {
 
   template<bool TPixelTrace, bool TSubSampling, typename T>
   void launch(const Runner<T>& _runner,
-              T it_start, T it_end, T it_step_size) {
+              T it_start, T it_end, T it_step_size,
+              int _stage
+    ) {
 
     dim3 threads1d( 128 );
     dim3 blocks( 64*_runner.number_sm_ );
@@ -328,38 +353,44 @@ struct Launcher {
     switch(_runner.current_) {
     case Set::POPCORN0:
       d_generate_pattern<0, TPixelTrace, TSubSampling>
-          <<<blocks, threads1d>>>(_runner.data_, _runner.params_, it_start, it_end, it_step_size);
+        <<<blocks, threads1d>>>(_runner.data_, _runner.params_, it_start, it_end, it_step_size, _stage);
       break;
     case Set::POPCORN1:
       d_generate_pattern<1, TPixelTrace, TSubSampling>
-          <<<blocks, threads1d>>>(_runner.data_, _runner.params_, it_start, it_end, it_step_size);
+          <<<blocks, threads1d>>>(_runner.data_, _runner.params_, it_start, it_end, it_step_size, _stage);
       break;
     case Set::POPCORN2:
       d_generate_pattern<2, TPixelTrace, TSubSampling>
-          <<<blocks, threads1d>>>(_runner.data_, _runner.params_, it_start, it_end, it_step_size);
+          <<<blocks, threads1d>>>(_runner.data_, _runner.params_, it_start, it_end, it_step_size, _stage);
       break;
     case Set::POPCORN3:
       d_generate_pattern<3, TPixelTrace, TSubSampling>
-          <<<blocks, threads1d>>>(_runner.data_, _runner.params_, it_start, it_end, it_step_size);
+          <<<blocks, threads1d>>>(_runner.data_, _runner.params_, it_start, it_end, it_step_size, _stage);
+      break;
+    case Set::POPCORN4:
+      d_generate_pattern<4, TPixelTrace, TSubSampling>
+          <<<blocks, threads1d>>>(_runner.data_, _runner.params_, it_start, it_end, it_step_size, _stage);
       break;
     }
   }
 
   template<typename T>
   void operator()(const Runner<T>& _runner,
-                  T it_start, T it_end, T it_step_size) {
+                  T it_start, T it_end, T it_step_size,
+                  int _stage = -1
+    ) {
 
-    if(_runner.params_.pixel_trace) {
-      if(_runner.params_.sub_sampling) {
-        launch<true, true>( _runner, it_start, it_end, it_step_size);
+    if(_runner.pixel_trace_) {
+      if(_runner.sub_sampling_) {
+        launch<true, true>( _runner, it_start, it_end, it_step_size, _stage);
       }else{
-        launch<true, false>( _runner, it_start, it_end, it_step_size);
+        launch<true, false>( _runner, it_start, it_end, it_step_size, _stage);
       }
     }else {
-      if(_runner.params_.sub_sampling) {
-        launch<false, true>( _runner, it_start, it_end, it_step_size);
+      if(_runner.sub_sampling_) {
+        launch<false, true>( _runner, it_start, it_end, it_step_size, _stage);
       }else{
-        launch<false, false>( _runner, it_start, it_end, it_step_size);
+        launch<false, false>( _runner, it_start, it_end, it_step_size, _stage);
       }
     }
   }
@@ -370,16 +401,31 @@ struct Launcher {
     dim3 threads1d( 128 );
     dim3 blocks( 64*_runner.number_sm_ );
 
-    if(_runner.params_.pixel_trace) {
-      if(_runner.params_.hslMode)
-        d_render_to_image<true, true><<<blocks, threads1d>>>(_pos, _runner.data_, _runner.params_);
+    switch(_runner.renderer_) {
+    case Renderer::DEFAULT:
+      if(_runner.pixel_trace_)
+        d_render_to_image<Renderer::DEFAULT, true>
+          <<<blocks, threads1d>>>(_pos, _runner.data_, _runner.params_);
       else
-        d_render_to_image<false, true><<<blocks, threads1d>>>(_pos, _runner.data_, _runner.params_);
-    } else {
-      if(_runner.params_.hslMode)
-        d_render_to_image<true, false><<<blocks, threads1d>>>(_pos, _runner.data_, _runner.params_);
+        d_render_to_image<Renderer::DEFAULT, false>
+          <<<blocks, threads1d>>>(_pos, _runner.data_, _runner.params_);
+      break;
+    case Renderer::HSL:
+      if(_runner.pixel_trace_)
+        d_render_to_image<Renderer::HSL, true>
+          <<<blocks, threads1d>>>(_pos, _runner.data_, _runner.params_);
       else
-        d_render_to_image<false, false><<<blocks, threads1d>>>(_pos, _runner.data_, _runner.params_);
+        d_render_to_image<Renderer::HSL, false>
+          <<<blocks, threads1d>>>(_pos, _runner.data_, _runner.params_);
+      break;
+    case Renderer::QUILEZ:
+      if(_runner.pixel_trace_)
+        d_render_to_image<Renderer::QUILEZ, true>
+          <<<blocks, threads1d>>>(_pos, _runner.data_, _runner.params_);
+      else
+        d_render_to_image<Renderer::QUILEZ, false>
+          <<<blocks, threads1d>>>(_pos, _runner.data_, _runner.params_);
+      break;
     }
   }
 };
@@ -402,14 +448,40 @@ float Runner<T>::launch_kernel(cudaGraphicsResource* _dst, unsigned _iteration_o
     const T it_end = it_start + params_.iterations_per_run/T(params_.max_iterations);
     const T it_step_size = 1.0/T(params_.max_iterations);
 
-    CHECK_CUDA(cudaGraphicsResourceGetMappedPointer((void**)&pos, &num_bytes, _dst));
-
     CHECK_CUDA(cudaEventRecord(custart));
 
-    Launcher()(*this, it_start, it_end, it_step_size);
+    if(renderer_==Renderer::QUILEZ) {
+      // red
+      Launcher()(*this, it_start, it_end, it_step_size, 0);
+
+      // green
+      auto tmp = params_;
+      params_.x0 = tmp.x0 * powf(0.999,tmp.saturation_slope);
+      params_.x1 = tmp.x1 * powf(0.999,tmp.saturation_slope);
+      params_.y0 = tmp.y0 * powf(0.999,tmp.saturation_slope);
+      params_.y1 = tmp.y1 * powf(0.999,tmp.saturation_slope);
+      params_.talpha = tmp.talpha * powf(1.7, tmp.hue_start);
+      params_.density_slope = tmp.density_slope * powf(1.9, tmp.hue_start);
+      //params_.hit_value = tmp.hit_value * powf(1.1, tmp.saturation_slope);
+      Launcher()(*this, it_start, it_end, it_step_size, 1);
+
+      // blue
+      params_.x0 = tmp.x0 * powf(1.001,tmp.saturation_slope);
+      params_.x1 = tmp.x1 * powf(1.001,tmp.saturation_slope);
+      params_.y0 = tmp.y0 * powf(1.001,tmp.saturation_slope);
+      params_.y1 = tmp.y1 * powf(1.001,tmp.saturation_slope);
+      params_.talpha = tmp.talpha * powf(1.5, tmp.hue_end);
+      params_.density_slope = tmp.density_slope * powf(1.7, tmp.hue_end);
+      //params_.hit_value = tmp.hit_value * powf(0.8, tmp.saturation_slope);
+      Launcher()(*this, it_start, it_end, it_step_size, 2);
+      params_ = tmp;
+    }else {
+      Launcher()(*this, it_start, it_end, it_step_size, -1);
+    }
 
     CHECK_CUDA(cudaEventRecord(cuend));
 
+    CHECK_CUDA(cudaGraphicsResourceGetMappedPointer((void**)&pos, &num_bytes, _dst));
     Launcher()(*this, pos);
 
     CHECK_CUDA( cudaEventSynchronize(cuend) );
@@ -437,8 +509,6 @@ void Runner<T>::alloc_buffer()
 template<typename T>
 void Runner<T>::init_buffer()
 {
-  //unsigned n = 5 * params_.n;
-  //  CHECK_CUDA( cudaMemset(data_.buffer, 0.0, n*sizeof(T)));
   int numSMs;
   int devId = 0;
   cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, devId);
@@ -462,20 +532,3 @@ void Runner<T>::cleanup_cuda()
     struct Runner<float>;
   }
 }
-
-/*
-template
-void alloc_buffer<double>(Data<double>&, const Parameters<double>&);
-template
-void init_buffer<double>(Data<double>&, const Parameters<double>&);
-template float launch_kernel<0, false, double>(cudaGraphicsResource*, Data<double>&, const Parameters<double>&);
-template float launch_kernel<1, false, double>(cudaGraphicsResource*, Data<double>&, const Parameters<double>&);
-template float launch_kernel<2, false, double>(cudaGraphicsResource*, Data<double>&, const Parameters<double>&);
-template float launch_kernel<3, false, double>(cudaGraphicsResource*, Data<double>&, const Parameters<double>&);
-template float launch_kernel<0, true, double>(cudaGraphicsResource*, Data<double>&, const Parameters<double>&);
-template float launch_kernel<1, true, double>(cudaGraphicsResource*, Data<double>&, const Parameters<double>&);
-template float launch_kernel<2, true, double>(cudaGraphicsResource*, Data<double>&, const Parameters<double>&);
-template float launch_kernel<3, true, double>(cudaGraphicsResource*, Data<double>&, const Parameters<double>&);
-template
-void cleanup_cuda<double>(Data<double>&);
-*/
